@@ -239,7 +239,6 @@ class Experiment:
             valid_timepoints.append(PlateMetadata(
                 time_point=time_point,
                 image_plate_dir=image_plate_dir,
-                cellprofiler_output_dir=i_path
             ))
 
         return valid_timepoints
@@ -252,8 +251,6 @@ class PlateMetadata:
     """ time_point is 1-indexed (!) """
     image_plate_dir: tp.Union[str,Path]
     """ directory containing images for this plate """
-    cellprofiler_output_dir: tp.Union[str,Path]
-    """ directory containing cellprofiler output for this plate """
     
     def process(
         self,
@@ -301,8 +298,6 @@ class PlateMetadata:
                 
                 note: in one test, this reduced the number of features from 1800 to 1100.
         """
-
-        print(f"{self.cellprofiler_output_dir = } ; {cellprofiler_output_path=}")
 
         cellprofiler_image_timepoints:tp.List[str]=cellprofiler_pipelines["timepoint"].to_list()
 
@@ -486,8 +481,8 @@ class PlateMetadata:
         
 
         # merge with qc data, if present
-        qc_df=None
-        if qc_df is not None:
+        # TODO temporarily disabled
+        if False and qc_df is not None:
             for c in qc_df.select(pl.col(pl.Utf8)).columns:
                 print(f"qc df col '{c}'")
             for c in df.select(pl.col(pl.Utf8)).columns:
@@ -759,7 +754,7 @@ class Plate:
                 print(top_contributors_df) # type: ignore
         elif method=="umap":
             n_components=2
-            umap_red = umap.UMAP(n_components=n_components)
+            umap_red = umap.UMAP(n_components=n_components) # type: ignore
             reduced_data=umap_red.fit_transform(df)
         else:
             raise ValueError(f"unknown method {method} (valid methods are [pca|umap])")
