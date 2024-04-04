@@ -10,6 +10,7 @@ dependencies = [
 
 	# default dataframe library
 	"pandas>=1.5.3,<1.6",
+	"pandas-stubs",
 	# required by pandas for database connection, and v2.0 removes ExecutionEngine.execute, which is required
 	"connectorx",
 	# required by pandas for excel file import
