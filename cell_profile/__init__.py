@@ -1,8 +1,6 @@
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 import typing as tp
-import time
 import os
 
 import numpy as np
@@ -15,81 +13,14 @@ from sklearn.decomposition import PCA
 import umap
 
 from .df_util import is_meta_column, handle_outliers, remove_nans, remove_highly_correlated
+from .misc import display, print, print_time, tqdm
 
-try:
-    from IPython.display import display # type: ignore
-except:
-    def display(*args,**kwargs):
-        print(*args,**kwargs)
-
-# -- parallel map implementation
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
-def par_map(items,mapfunc,num_workers=None,**tqdm_args):
-
-    start_time=time.time()
-
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        # Submit all tasks and collect Future objects
-        futures = {executor.submit(mapfunc, item): item for item in items}
-
-        # Use tqdm to display progress
-        results = []
-        for future in tqdm(as_completed(futures), total=len(items)):
-            results.append(future.result())
-
-    end_time=time.time()
-    print(f"time elapsed: {(end_time-start_time):.3f}s")
-
-# example:
-# par_map(range(10),lambda x:time.sleep(0.2),num_workers=1)
-
-# -- par_map end
-
-# chatgpt's check to see if this code is running in a jupyter notebook or not
-def is_notebook():
-    try:
-        # get_ipython not defined in standard python interpreter, i.e. call will throw
-        shell = get_ipython().__class__.__name__ # type: ignore
-        if shell == 'ZMQInteractiveShell':
-            return True  # Jupyter Notebook or Jupyter Lab
-        elif shell == 'TerminalInteractiveShell':
-            return False  # Terminal running IPython
-        else:
-            return False  # Other type, assume not a notebook
-    except NameError:
-        return False  # Probably standard Python interpreter
-
-if is_notebook():
-    from tqdm.notebook import tqdm
-else:
-    from tqdm import tqdm
-
-# implement custom print function for better formatting --
-def better_print(s_in:str,*args,tab_width:int=4,**kwargs):
-    s=str(s_in).replace('\t',' '*tab_width)
-    raw_print(s,*args,**kwargs)
-    
-print_already_overwritten=True
-try:
-    _test=raw_print # type: ignore
-except:
-    print_already_overwritten=False
-    
-if not print_already_overwritten:
-    raw_print=print
-print=better_print
-# -- end custom print implementation
-
-def print_time(msg=None,prefix=""):
-    print_str=f"{prefix+' ' if prefix is not None else ''}" \
-              f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}" \
-              f"{' '+msg if msg else ''}"
-    print(print_str)
-
-# this is used quite often to only select those columns that contain float values
 float_columns=[pl.col(pl.Float32),pl.col(pl.Float64)]
+"""
+allows to select only columns that contain float values, e.g. df.select(float_columns)
+
+useful because columns of other types are usually just metadata, e.g. indices [int], strings etc.
+"""
 
 @dataclass
 class Experiment:
@@ -100,6 +31,8 @@ class Experiment:
 
     def retrieve_cellprofiler_pipelines(self)->pl.DataFrame:
         """
+            retrieve cellprofiler pipeline information from database
+
             return:
                 information about all plates in this experiment, more specifically:
                     - plate_id: key into plate_acquisition table that contains information about the plate/images
@@ -270,6 +203,9 @@ class Experiment:
             return layout_df
 
     def retrieve_plates_metadata(self)->tp.List["PlateMetadata"]:
+        """
+        get list of all plates in this experiment
+        """
     
         cellprofiler_pipelines=self.retrieve_cellprofiler_pipelines()
         
@@ -311,11 +247,13 @@ class Experiment:
 
 @dataclass
 class PlateMetadata:
-    """ time_point is 1-indexed (!)"""
     
     time_point: int
+    """ time_point is 1-indexed (!) """
     image_plate_dir: tp.Union[str,Path]
+    """ directory containing images for this plate """
     cellprofiler_output_dir: tp.Union[str,Path]
+    """ directory containing cellprofiler output for this plate """
     
     def process(
         self,
@@ -323,7 +261,7 @@ class PlateMetadata:
         cellprofiler_output_path: Path,
         cellprofiler_pipelines: pl.DataFrame,
         compound_layout: pl.DataFrame,
-        
+
         *,
         timeit:bool=False,
         show_non_float_columns:bool=False,
@@ -363,6 +301,8 @@ class PlateMetadata:
                 
                 note: in one test, this reduced the number of features from 1800 to 1100.
         """
+
+        print(f"{self.cellprofiler_output_dir = } ; {cellprofiler_output_path=}")
 
         cellprofiler_image_timepoints:tp.List[str]=cellprofiler_pipelines["timepoint"].to_list()
 
@@ -759,6 +699,7 @@ class PlateMetadata:
             print("first two entries of final dataframe:")
             display(combined_per_well.head(2))
 
+            print(f"{self.time_point=} {Path(cpi.image_plate_dir).name=}")
             print_time(f"timepoint {Path(cpi.image_plate_dir).name} done")
 
         return cpi
