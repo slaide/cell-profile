@@ -1,10 +1,7 @@
-print("hello from init")
-
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import typing as tp
-import re
 import time
 import os
 
@@ -17,8 +14,10 @@ import plotly.express as px
 from sklearn.decomposition import PCA
 import umap
 
+from .df_util import is_meta_column, handle_outliers, remove_nans, remove_highly_correlated
+
 try:
-    from IPython.display import display
+    from IPython.display import display # type: ignore
 except:
     def display(*args,**kwargs):
         print(*args,**kwargs)
@@ -51,7 +50,8 @@ def par_map(items,mapfunc,num_workers=None,**tqdm_args):
 # chatgpt's check to see if this code is running in a jupyter notebook or not
 def is_notebook():
     try:
-        shell = get_ipython().__class__.__name__
+        # get_ipython not defined in standard python interpreter, i.e. call will throw
+        shell = get_ipython().__class__.__name__ # type: ignore
         if shell == 'ZMQInteractiveShell':
             return True  # Jupyter Notebook or Jupyter Lab
         elif shell == 'TerminalInteractiveShell':
@@ -73,7 +73,7 @@ def better_print(s_in:str,*args,tab_width:int=4,**kwargs):
     
 print_already_overwritten=True
 try:
-    _test=raw_print
+    _test=raw_print # type: ignore
 except:
     print_already_overwritten=False
     
@@ -90,58 +90,6 @@ def print_time(msg=None,prefix=""):
 
 # this is used quite often to only select those columns that contain float values
 float_columns=[pl.col(pl.Float32),pl.col(pl.Float64)]
-
-# this is code from Dan
-def is_meta_column(
-    c:str,
-
-    allowlist:tp.List[str]=["Metadata_Well","Metadata_Barcode","Metadata_AcqID","Metadata_Site"],
-    denylist:tp.List[str]=[],
-)->bool:
-    """
-        allowlist:
-            the function will return False for these, no matter if they are metadata or not
-        denylist:
-            the function will return True for these, no matter if they are metadata or not
-    """
-
-    if c in allowlist:
-        return False
-    if c in denylist:
-        return True
-
-    for ex in '''
-        Metadata
-        ^Count
-        ImageNumber
-        Object
-        Parent
-        Children
-        Plate
-        Well
-        Location
-        _[XYZ]_
-        _[XYZ]$
-        BoundingBox
-        Phase
-        Orientation
-        Angle
-        Scale
-        Scaling
-        Width
-        Height
-        Group
-        FileName
-        PathName
-        URL
-        Execution
-        ModuleError
-        LargeBrightArtefact
-        MD5Digest
-    '''.split():
-        if re.search(ex, c):
-            return True
-    return False
 
 @dataclass
 class Experiment:
@@ -294,10 +242,10 @@ class Experiment:
                 
         """
         if source=="db":
-            db_default_colnames_ret="well_id, pert_type, solvent, compound_name, cbkid, smiles, inchi, inkey".split(", ")
+            db_default_colnames_ret:list="well_id, pert_type, solvent, compound_name, cbkid, smiles, inchi, inkey".split(", ")
             if db_colnames_ret is None:
                 db_colnames_ret=db_default_colnames_ret
-                
+
             compound_layout=pl.read_database_uri(
                 query=f"""
                     SELECT {', '.join(db_colnames_ret)}
@@ -311,7 +259,7 @@ class Experiment:
             source_file=Path(source)
             assert source_file.exists(), f"compound layout source file '{source}' does not exist (current directory is {os.getcwd()})"
 
-            file_default_colnames_ret="well_id pert_type".split(" ")
+            file_default_colnames_ret:list="well_id pert_type".split(" ")
             if file_colnames_ret is None:
                 file_colnames_ret=file_default_colnames_ret
 
@@ -375,6 +323,7 @@ class PlateMetadata:
         cellprofiler_output_path: Path,
         cellprofiler_pipelines: pl.DataFrame,
         compound_layout: pl.DataFrame,
+        
         *,
         timeit:bool=False,
         show_non_float_columns:bool=False,
@@ -384,6 +333,7 @@ class PlateMetadata:
         unused_feature_threshold_std:float=0.0001,
         
         print_unused_columns:bool=False,
+        remove_correlated:bool=False,
 
         pre_normalize_clip_method:tp.Optional[dict]=dict(
             level_method="sigma",
@@ -414,7 +364,7 @@ class PlateMetadata:
                 note: in one test, this reduced the number of features from 1800 to 1100.
         """
 
-        cellprofiler_image_timepoints:tp.List[str]=cellprofiler_pipelines["timepoint"]
+        cellprofiler_image_timepoints:tp.List[str]=cellprofiler_pipelines["timepoint"].to_list()
 
         # -- should be default arguments
 
@@ -545,7 +495,8 @@ class PlateMetadata:
             print_time(f"joined cytoplasm+nucleus and cells, now have {df.shape} entries")
 
         df=df.drop([c for c in df.columns if is_meta_column(c)])
-        qc_df=qc_df.drop([c for c in qc_df.columns if is_meta_column(c)])
+        if qc_df is not None:
+            qc_df=qc_df.drop([c for c in qc_df.columns if is_meta_column(c)])
 
         if timeit:
             s=f"dropped unused metadata {df.shape = }"
@@ -579,8 +530,9 @@ class PlateMetadata:
             df = df.drop(unused_cols)
 
             # remove highly correlated features
-            highly_correlated_columns = remove_highly_correlated(df.select(float_columns),remove_inplace=False)
-            df = df.drop(highly_correlated_columns)
+            if remove_correlated:
+                highly_correlated_columns = remove_highly_correlated(df.select(float_columns),remove_inplace=False)
+                df = df.drop(highly_correlated_columns)
 
             if timeit:
                 print_time(
@@ -714,7 +666,7 @@ class PlateMetadata:
         mu = df_DMSO.select(float_columns).mean()
 
         if ensure_no_nan_or_inf:
-            for col in mu.columns:
+            for i,col in enumerate(mu.columns):
                 if mu[col].is_null().any():
                     raise RuntimeError(f"some mean value in column {col,i} is nan?!")
                 if mu[col].is_infinite().any():
@@ -848,7 +800,7 @@ class Plate:
         if method=="pca":
             n_components=2
             pca_red = PCA(n_components=n_components)
-            reduced_data = pca_red.fit_transform(df)
+            reduced_data = pca_red.fit_transform(df.to_pandas())
 
             if print_feature_pca_fraction:
                 # Get the loadings and calculate squared loadings for variance contribution
@@ -863,7 +815,7 @@ class Plate:
                 # Convert to DataFrame for better visualization
                 top_contributors_df = pd.DataFrame(top_contributors)
 
-                print(top_contributors_df)
+                print(top_contributors_df) # type: ignore
         elif method=="umap":
             n_components=2
             umap_red = umap.UMAP(n_components=n_components)
@@ -895,100 +847,3 @@ class Plate:
         ).update_traces(
             marker=dict(size=10)
         ).show()
-
-def remove_highly_correlated(df, threshold=0.9, remove_inplace:bool=True)->tp.Union[tp.List[str],pl.DataFrame]:
-    """
-        remove_inplace:
-            True : remove columns and return df
-            False : return highly correlated column names
-    """
-    
-    # Convert Polars DataFrame to NumPy for correlation calculation
-    df_np = df.to_numpy()
-
-    # Calculate correlation matrix
-    corr_matrix = np.corrcoef(df_np, rowvar=False)
-    n_cols = corr_matrix.shape[0]
-
-    # Identify columns to drop
-    drop_indices = set()
-    for i in range(n_cols):
-        for j in range(i+1, n_cols):
-            if np.abs(corr_matrix[i, j]) > threshold:
-                drop_indices.add(j)
-
-    # Convert drop indices back to column names
-    cols_to_drop = [df.columns[idx] for idx in drop_indices]
-
-    if remove_inplace:
-        # Drop columns from the original Polars DataFrame
-        df_dropped = df.drop(cols_to_drop)
-
-        return df_dropped
-    else:
-        return cols_to_drop
-    
-def handle_outliers(
-    df:pl.DataFrame,
-    columns:[str],
-    *,
-    level_method:str="sigma",
-    lower_level:float=-1,
-    upper_level:float=1,
-    method:str="clip"
-)->pl.DataFrame:
-    """
-    handle outliers with defined method
-    
-    with clip method:
-        clip quantiles to provided levels in provided columns
-
-    with remove method:
-        remove outliers from dataset
-    """
-
-    valid_methods=["clip","remove"]
-
-    method="clip"
-
-    df_relevant_cols=df.select(columns)
-    
-    if level_method=="sigma":
-        mean=df_relevant_cols.mean()
-        sigma=df_relevant_cols.std()
-        
-        min_value=mean+lower_level*sigma
-        max_value=mean+upper_level*sigma
-    elif level_method=="quantile":
-        min_value = df_relevant_cols.quantile(lower_level)
-        max_value = df_relevant_cols.quantile(upper_level)
-    else:
-        raise ValueError(f"method '{level_method}' is invalid, must be [sigma|quantile]")
-        
-    # just make sure that the min is smaller than the max to avoid usage bugs
-    assert (min_value>max_value).sum().to_numpy()[0,0]==0
-
-    if method=="clip":
-        for col in columns:
-            df = df.with_columns(
-                pl.col(col).clip(lower_bound=min_value[col],upper_bound=max_value[col])
-            )
-
-    elif method=="remove":
-        for col in columns:
-            df = df.filter(
-                (pl.col(col) > min_value[col]) & (pl.col(col) < max_value[col])
-            )
-
-    else:
-        raise RuntimeError(f"unknown method {method} (valid methods are {valid_methods})")
-        
-    return df
-
-def remove_nans(df:pl.DataFrame,columns:[str])->pl.DataFrame:
-    """ remove those rows that contain NaN in any of the provided columns """
-    num_rows_before_nan_trim=df.shape[0]
-    for col in df.select(columns).columns:
-        df=df.filter(pl.col(col).is_not_null())
-        
-    return df
