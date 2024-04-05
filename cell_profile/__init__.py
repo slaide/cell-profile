@@ -13,7 +13,7 @@ import plotly.express as px
 from sklearn.decomposition import PCA
 import umap
 
-from .df_util import is_meta_column, handle_outliers, remove_nans, remove_highly_correlated
+from .df_util import is_meta_column, handle_outliers, remove_nans, remove_highly_correlated, Sigma, Quantile
 from .misc import display, print, print_time, tqdm
 
 float_columns=[pl.col(pl.Float32),pl.col(pl.Float64)]
@@ -264,15 +264,18 @@ class PlateMetadata:
         "Metadata_Site"
     ])
 
-    feature_set_names: tp.List[str]=dc.field(default_factory=lambda:['cytoplasm','nuclei','cells'])
-    # the prefix is used later on by itself
     feature_file_prefix: str='featICF_'
+    """ this prefix is used in several file operations """
+    feature_set_names: tp.List[str]=dc.field(default_factory=lambda:['cytoplasm','nuclei','cells'])
+    """
+    suffix of the feature filenames, so that the filenames are
+    f'{feature_file_prefix}{feature_set_names[i]}'
+    """
 
     @property
     def feature_filenames(self)->tp.List[str]:
         return [self.feature_file_prefix+fsn for fsn in self.feature_set_names]
 
-    df_feat:tp.Optional[pl.DataFrame]=None
     df_qc:tp.Optional[pl.DataFrame]=None
     df_qc_images:tp.Optional[pl.DataFrame]=None
     df_qc_nuclei:tp.Optional[pl.DataFrame]=None
@@ -281,6 +284,7 @@ class PlateMetadata:
         cellprofiler_output_path: Path,
         cellprofiler_pipelines: pl.DataFrame,
 
+        *,
         timeit:bool=False,
     ):
 
@@ -369,7 +373,7 @@ class PlateMetadata:
                     if c.startswith("Metadata_")]
                 ))
 
-            qc_df=self.df_qc_images.join(
+            self.df_qc=self.df_qc_images.join(
                 self.df_qc_nuclei,
                 # join (implicitely remove all cells where the image has been filtered out)
                 how="inner",
@@ -378,8 +382,8 @@ class PlateMetadata:
             )
 
             if False:
-                print(f"after join: {qc_df.shape = }")
-                display(qc_df.head(2))
+                print(f"after join: {self.df_qc.shape = }")
+                display(self.df_qc.head(2))
 
             if timeit:
                 print_time("joined qc files")
@@ -407,7 +411,8 @@ class PlateMetadata:
 
         if timeit:
             print_time("reading feature files dones")
-    
+
+
     def process(
         self,
         
@@ -424,18 +429,8 @@ class PlateMetadata:
         print_unused_columns:bool=False,
         remove_correlated:bool=False,
 
-        pre_normalize_clip_method:tp.Optional[dict]=dict(
-            level_method="sigma",
-            lower_level=-3,
-            upper_level=3,
-            method="remove"
-        ),
-        post_normalize_clip_method:tp.Optional[dict]=dict(
-            level_method="sigma",
-            lower_level=-3,
-            upper_level=3,
-            method="clip"
-        ),
+        pre_normalize_clip_method:tp.Optional[dict]=None,
+        post_normalize_clip_method:tp.Optional[dict]=None,
     ) -> "Plate":
         """
             process all the things, combine dataframes, clean data
@@ -544,14 +539,14 @@ class PlateMetadata:
 
         # merge with qc data, if present
         # TODO temporarily disabled
-        if False and qc_df is not None:
-            for c in qc_df.select(pl.col(pl.Utf8)).columns:
+        if False and self.df_qc is not None:
+            for c in self.df_qc.select(pl.col(pl.Utf8)).columns:
                 print(f"qc df col '{c}'")
             for c in df.select(pl.col(pl.Utf8)).columns:
                 print(f"df col '{c}'")
             
-            print(f"{qc_df.shape = }  {df.shape = }")
-            df=qc_df.join(
+            print(f"{self.df_qc.shape = }  {df.shape = }")
+            df=self.df_qc.join(
                 df,
                 how="inner",
                 left_on=metadata_cols,
@@ -567,7 +562,7 @@ class PlateMetadata:
 
         # now we have all data merged, and can start filerting, cleaning etc.
         
-        # if present, use qc_df to filter out bad cells/images
+        # if present, use self.df_qc to filter out bad cells/images
         if self.df_qc is not None:
             pass # TODO
 

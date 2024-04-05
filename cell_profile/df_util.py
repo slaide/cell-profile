@@ -98,14 +98,79 @@ def remove_highly_correlated(
     else:
         return cols_to_drop
     
+class OutlierDetectionMethod:
+    """ virtual class! """
+    def __init__(self):
+        pass
+    def detect(self,df:pl.DataFrame,columns:tp.List[str])->tp.Tuple[pl.DataFrame,pl.DataFrame]:
+        raise NotImplementedError
+
+class Sigma(OutlierDetectionMethod):
+    def __init__(self,
+        lower_level:float=1,
+        upper_level:tp.Optional[float]=None,
+    ):
+        """
+        lower_level:
+            sigma level for lower bound
+
+        upper_level:
+            if None, upper_level will be set to lower_level
+            sigma level for upper bound
+        """
+
+        assert lower_level>0
+        if upper_level is not None:
+            assert upper_level>0
+
+        self.lower_level=lower_level
+        if upper_level is None:
+            self.upper_level=lower_level
+        else:
+            self.upper_level=upper_level
+
+    def detect(self,df:pl.DataFrame,columns:tp.List[str]) -> tp.Tuple[pl.DataFrame, pl.DataFrame]:
+        selected_df=df.select(columns)
+        mean=selected_df.mean()
+        sigma=selected_df.std()
+
+        min_value=mean-self.lower_level*sigma
+        max_value=mean+self.upper_level*sigma
+
+        return min_value,max_value
+    
+class Quantile(OutlierDetectionMethod):
+    def __init__(self,
+        lower_level:float=0.05,
+        upper_level:float=0.95,
+    ):
+        """
+        lower_level:
+            quantile level for lower bound
+
+        upper_level:
+            quantile level for upper bound
+        """
+
+        assert 0<=lower_level<1
+        assert 0<=upper_level<1
+
+        self.lower_level=lower_level
+        self.upper_level=upper_level
+
+    def detect(self,df:pl.DataFrame,columns:tp.List[str]) -> tp.Tuple[pl.DataFrame, pl.DataFrame]:
+        selected_df=df.select(columns)
+        min_value=selected_df.quantile(self.lower_level)
+        max_value=selected_df.quantile(self.upper_level)
+
+        return min_value,max_value
+
 def handle_outliers(
     df:pl.DataFrame,
     columns:tp.List[str],
     *,
-    level_method:tp.Literal["sigma","quantile"]="sigma",
-    lower_level:float=-1,
-    upper_level:float=1,
-    method:str="clip"
+    level_method:OutlierDetectionMethod=Sigma(),
+    method:tp.Literal["clip","remove"]="clip",
 )->pl.DataFrame:
     """
     handle outliers with defined method
@@ -116,25 +181,9 @@ def handle_outliers(
     with remove method:
         remove outliers from dataset
     """
-
-    valid_methods=["clip","remove"]
-
-    method="clip"
-
-    df_relevant_cols=df.select(columns)
     
-    if level_method=="sigma":
-        mean=df_relevant_cols.mean()
-        sigma=df_relevant_cols.std()
-        
-        min_value=mean+lower_level*sigma
-        max_value=mean+upper_level*sigma
-    elif level_method=="quantile":
-        min_value = df_relevant_cols.quantile(lower_level)
-        max_value = df_relevant_cols.quantile(upper_level)
-    else:
-        raise ValueError(f"method '{level_method}' is invalid, must be [sigma|quantile]")
-        
+    min_value,max_value=level_method.detect(df,columns)
+
     # just make sure that the min is smaller than the max to avoid usage bugs
     assert (min_value>max_value).sum().to_numpy()[0,0]==0
 
@@ -151,7 +200,7 @@ def handle_outliers(
             )
 
     else:
-        raise RuntimeError(f"unknown method {method} (valid methods are {valid_methods})")
+        raise RuntimeError(f"unknown method {method} (valid methods are {handle_outliers.__annotations__['method'].__args__})")
         
     return df
 
