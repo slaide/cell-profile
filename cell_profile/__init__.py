@@ -232,13 +232,13 @@ class Experiment:
             # print warning if there is a mismatch
             # e.g. could be issue during imaging, microscope crashed etc.
             if num_images_current_timepoint!=num_images_per_timepoint:
-                print(f"warning: timepoint {image_plate_dir.name} " \
+                print(f"warning: timepoint {time_point} " \
                     f"contains {num_images_current_timepoint} images, " \
                     f"though {num_images_per_timepoint} were expected")
 
             valid_timepoints.append(PlateMetadata(
                 time_point=time_point,
-                image_plate_dir=image_plate_dir,
+                plate_name=Path(image_plate_dir).name,
             ))
 
         return valid_timepoints
@@ -249,14 +249,134 @@ class PlateMetadata:
     
     time_point: int
     """ time_point is 1-indexed (!) """
-    image_plate_dir: tp.Union[str,Path]
-    """ directory containing images for this plate """
+    plate_name: str
+    """ name of this plate, e.g. barcode """
+
+    feature_files:tp.Dict[str,pl.DataFrame]={}
+
+    metadata_cols:tp.List[str]=[
+        "Metadata_AcqID",
+        "Metadata_Barcode",
+        "Metadata_Well",
+        "Metadata_Site"
+    ]
+
+    feature_set_names: tp.List[str]=['cytoplasm','nuclei','cells']
+    # the prefix is used later on by itself
+    feature_file_prefix: str='featICF_'
+
+    @property
+    def feature_filenames(self)->tp.List[str]:
+        return [self.feature_file_prefix+fsn for fsn in self.feature_set_names]
+
+    df_feat:tp.Optional[pl.DataFrame]=None
+    df_qc:tp.Optional[pl.DataFrame]=None
+    df_qc_images:tp.Optional[pl.DataFrame]=None
+    df_qc_nuclei:tp.Optional[pl.DataFrame]=None
+
+    def read_files(self,
+        cellprofiler_output_path: Path,
+        cellprofiler_pipelines: pl.DataFrame,
+
+        timeit:bool=False,
+    ):
+
+        cellprofiler_image_timepoints:tp.List[str]=cellprofiler_pipelines["timepoint"].to_list()
+        
+        # not sure anymore why this is necessary, but it is
+        plate_timepoint=int(cellprofiler_image_timepoints[self.time_point-1])
+
+        current_pipeline=cellprofiler_pipelines.filter(pl.col("timepoint")==str(self.time_point)).rows(named=True)[0]
+
+        cp_plate_out_path=cellprofiler_output_path/current_pipeline["plate_id"]
+
+        pipeline_id_qc=None
+        if current_pipeline["pipeline_id_qc"]:
+            pipeline_id_qc=cp_plate_out_path/current_pipeline["pipeline_id_qc"]
+
+            qc_raw_filepath=list(Path(pipeline_id_qc).glob("qcRAW_images*.parquet"))[0]
+            self.df_qc_images=pl.read_parquet(qc_raw_filepath)
+            # print(f"{self.df_qc_images.shape = }")
+            
+            # disabled because it filters too many images in the cleo dataset
+            if False:
+                # filter out images with any qc flag set:
+                # qc_flag_raw*, etc. qc_flag_rawACTIN_Blurred, *_Blurry, *_Saturated
+                qc_flag_cols=[x for x in self.df_qc_images.columns if x.startswith("qc_flag_raw")]
+                # print(f"{qc_flag_cols = }")
+                self.df_qc_images=self.df_qc_images.filter(pl.sum_horizontal(pl.col([c for c in qc_flag_cols if c.endswith("_Blurred")])) == 0)
+                self.df_qc_images=self.df_qc_images.filter(pl.sum_horizontal(pl.col([c for c in qc_flag_cols if c.endswith("_Blurry")])) == 0)
+                display(self.df_qc_images.select(qc_flag_cols).sum())
+                print(f"(after flag filter) {self.df_qc_images.shape = }")
+                display(self.df_qc_images.head(2))
+
+            qc_nuclei_filename_list=list(Path(pipeline_id_qc).glob("qcRAW_nuclei*.parquet"))
+            assert len(qc_nuclei_filename_list)==1, f"expected exactly one nuclei file, but found {len(qc_nuclei_filename_list)}"
+            qc_nuclei_filename=qc_nuclei_filename_list[0]
+            self.df_qc_nuclei=pl.read_parquet(qc_nuclei_filename)
+            # print(f"{self.df_qc_nuclei.shape = }")
+
+            if timeit:
+                print_time("read qc files")
+
+        if self.df_qc_nuclei is not None and self.df_qc_images is not None:
+            if False:
+                print("self.df_qc_images")
+                # list all columns with str datatype
+                print("str cols")
+                print("\n".join([f"  {c}" for c in self.df_qc_images.columns if self.df_qc_images[c].dtype==pl.Utf8]))
+                print("metadata cols")
+                print("\n".join([f"  {c}" for c in self.df_qc_images.columns if c.startswith("Metadata_")]))
+                print("self.df_qc_nuclei")
+                print("str cols")
+                print("\n".join([f"  {c}" for c in self.df_qc_nuclei.columns if self.df_qc_nuclei[c].dtype==pl.Utf8]))
+                print("metadata cols")
+                print("\n".join([f"  {c}" for c in self.df_qc_images.columns if c.startswith("Metadata_")]))
+
+            qc_df=self.df_qc_images.join(
+                self.df_qc_nuclei,
+                # join (implicitely remove all cells where the image has been filtered out)
+                how="inner",
+                left_on=self.metadata_cols,
+                right_on=self.metadata_cols,
+            )
+
+            if False:
+                print(f"after join: {qc_df.shape = }")
+                display(qc_df.head(2))
+
+            if timeit:
+                print_time("joined qc files")
+
+        pipeline_id_features=cp_plate_out_path/current_pipeline["pipeline_id_feat"]
+
+        feature_files=dict()
+
+        feature_parquet_files=Path(pipeline_id_features).glob("*.parquet")
+        feature_set_cellcount={}
+        for f in sorted(feature_parquet_files):
+            if not Path(f).stem in self.feature_filenames:
+                continue
+
+            feature_set_name=Path(f).stem[len(self.feature_file_prefix):]
+
+            # add prefix to columns names because pd.merge renames the column names if they collide
+            f_df=pl.read_parquet(f)
+            f_df=f_df.rename({x:f'{feature_set_name}_{x}' for x in f_df.columns if not x.startswith("Metadata_")})
+
+            feature_files[feature_set_name]=f_df
+
+            if timeit:
+                print(f"num entries in {feature_set_name} is {f_df.shape}")
+
+            feature_set_cellcount[feature_set_name]=f_df.shape[0]
+
+        if timeit:
+            print_time("read files")
     
     def process(
         self,
         
-        cellprofiler_output_path: Path,
-        cellprofiler_pipelines: pl.DataFrame,
         compound_layout: pl.DataFrame,
 
         *,
@@ -282,7 +402,7 @@ class PlateMetadata:
             upper_level=3,
             method="clip"
         ),
-    ):
+    ) -> "Plate":
         """
             process all the things, combine dataframes, clean data
             
@@ -299,110 +419,15 @@ class PlateMetadata:
                 note: in one test, this reduced the number of features from 1800 to 1100.
         """
 
-        cellprofiler_image_timepoints:tp.List[str]=cellprofiler_pipelines["timepoint"].to_list()
-
-        # -- should be default arguments
-
-        feature_set_names=['cytoplasm','nuclei','cells']
-        # the prefix is used later on by itself
-        feature_file_prefix='featICF_'
-
-        feature_filenames=[feature_file_prefix+fsn for fsn in feature_set_names]
-
-        # -- end default arguments
-
         if timeit:
             print_time("starting")
-        
-        i_i=self.time_point-1
 
-        current_pipeline=cellprofiler_pipelines.filter(pl.col("timepoint")==str(self.time_point)).rows(named=True)[0]
-
-        cp_plate_out_path=cellprofiler_output_path/current_pipeline["plate_id"]
-
-        pipeline_id_qc=None
-        qc_df=None
-        qc_join_on_col_names=["Metadata_AcqID","Metadata_Barcode","Metadata_Well","Metadata_Site"]
-        metadata_cols=qc_join_on_col_names
-        if current_pipeline["pipeline_id_qc"]:
-            pipeline_id_qc=cp_plate_out_path/current_pipeline["pipeline_id_qc"]
-
-            qc_raw_filepath=list(Path(pipeline_id_qc).glob("qcRAW_images*.parquet"))[0]
-            qc_images_df=pl.read_parquet(qc_raw_filepath)
-            # print(f"{qc_images_df.shape = }")
-            
-            # filter out images with any qc flag set:
-            # qc_flag_raw*, etc. qc_flag_rawACTIN_Blurred, *_Blurry, *_Saturated
-            qc_flag_cols=[x for x in qc_images_df.columns if x.startswith("qc_flag_raw")]
-            # print(f"{qc_flag_cols = }")
-            #qc_images_df=qc_images_df.filter(pl.sum_horizontal(pl.col([c for c in qc_flag_cols if c.endswith("_Blurred")])) == 0)
-            #qc_images_df=qc_images_df.filter(pl.sum_horizontal(pl.col([c for c in qc_flag_cols if c.endswith("_Blurry")])) == 0)
-            if False:
-                display(qc_images_df.select(qc_flag_cols).sum())
-                print(f"(after flag filter) {qc_images_df.shape = }")
-                display(qc_images_df.head(2))
-
-            qc_nuclei_filename=list(Path(pipeline_id_qc).glob("qcRAW_nuclei*.parquet"))[0]
-            qc_nuclei_df=pl.read_parquet(qc_nuclei_filename)
-            # print(f"{qc_nuclei_df.shape = }")
-
-            if False:
-                print("qc_images_df")
-                # list all columns with str datatype
-                print("str cols")
-                print("\n".join([f"  {c}" for c in qc_images_df.columns if qc_images_df[c].dtype==pl.Utf8]))
-                print("metadata cols")
-                print("\n".join([f"  {c}" for c in qc_images_df.columns if c.startswith("Metadata_")]))
-                print("qc_nuclei_df")
-                print("str cols")
-                print("\n".join([f"  {c}" for c in qc_nuclei_df.columns if qc_nuclei_df[c].dtype==pl.Utf8]))
-                print("metadata cols")
-                print("\n".join([f"  {c}" for c in qc_images_df.columns if c.startswith("Metadata_")]))
-
-            qc_df=qc_images_df.join(
-                qc_nuclei_df,
-                # join (implicitely remove all cells where the image has been filtered out)
-                how="inner",
-                left_on=qc_join_on_col_names,
-                right_on=qc_join_on_col_names,
-            )
-
-            if False:
-                print(f"after join: {qc_df.shape = }")
-                display(qc_df.head(2))
-
-        if timeit:
-            print_time("read qc files")
-
-        pipeline_id_features=cp_plate_out_path/current_pipeline["pipeline_id_feat"]
-
-        feature_files=dict()
-
-        feature_parquet_files=Path(pipeline_id_features).glob("*.parquet")
-        feature_set_cellcount={}
-        for f in sorted(feature_parquet_files):
-            if not Path(f).stem in feature_filenames:
-                continue
-
-            feature_set_name=Path(f).stem[len(feature_file_prefix):]
-
-            # add prefix to columns names because pd.merge renames the column names if they collide
-            f_df=pl.read_parquet(f)
-            f_df=f_df.rename({x:f'{feature_set_name}_{x}' for x in f_df.columns if not x.startswith("Metadata_")})
-
-            feature_files[feature_set_name]=f_df
-
-            if timeit:
-                print(f"num entries in {feature_set_name} is {f_df.shape}")
-
-            feature_set_cellcount[feature_set_name]=f_df.shape[0]
-
-        if timeit:
-            print_time("read files")
+        assert "cytoplasm" in self.feature_files, "did not find cytoplasm feature file"
+        assert "nuclei" in self.feature_files, "did not find nuclei feature file"
 
         # step 1: Take the mean values of 'multiple nuclei' belonging to one cell
-        feature_files['nuclei'] = feature_files['nuclei'].group_by(
-            metadata_cols
+        self.feature_files['nuclei'] = self.feature_files['nuclei'].group_by(
+            self.metadata_cols
             + [
                 "nuclei_Parent_cells",
             ]
@@ -413,30 +438,30 @@ class PlateMetadata:
             print_time("calculated average nucleus for each cell")
 
         # step 2: merge nuclei and cytoplasm objects
-        df = feature_files['cytoplasm'].join(feature_files['nuclei'],
+        df = self.feature_files['cytoplasm'].join(self.feature_files['nuclei'],
                         how='inner', 
-                        right_on= metadata_cols + ["nuclei_Parent_cells"],
-                        left_on = metadata_cols + ["cytoplasm_ObjectNumber"])
+                        right_on= self.metadata_cols + ["nuclei_Parent_cells"],
+                        left_on = self.metadata_cols + ["cytoplasm_ObjectNumber"])
 
         if timeit:
             print_time(f"joined cytoplasm and nucleus, now have {len(df)} entries")
 
         # step 3: join cells objects
-        df = df.join(feature_files['cells'], how='inner', 
-                        left_on =  metadata_cols + ["cytoplasm_ObjectNumber"],
-                        right_on = metadata_cols + ["cells_ObjectNumber"])
+        df = df.join(self.feature_files['cells'], how='inner', 
+                        left_on =  self.metadata_cols + ["cytoplasm_ObjectNumber"],
+                        right_on = self.metadata_cols + ["cells_ObjectNumber"])
 
         if timeit:
             print_time(f"joined cytoplasm+nucleus and cells, now have {df.shape} entries")
 
         df=df.drop([c for c in df.columns if is_meta_column(c)])
-        if qc_df is not None:
-            qc_df=qc_df.drop([c for c in qc_df.columns if is_meta_column(c)])
+        if self.df_qc is not None:
+            self.df_qc=self.df_qc.drop([c for c in self.df_qc.columns if is_meta_column(c)])
 
         if timeit:
             s=f"dropped unused metadata {df.shape = }"
-            if qc_df is not None:
-                s+=f" {qc_df.shape = }"
+            if self.df_qc is not None:
+                s+=f" {self.df_qc.shape = }"
             print_time(s)
 
         # convert all *_ImageNumber columns to int
@@ -467,6 +492,7 @@ class PlateMetadata:
             # remove highly correlated features
             if remove_correlated:
                 highly_correlated_columns = remove_highly_correlated(df.select(float_columns),remove_inplace=False)
+                assert type(highly_correlated_columns)==list, f"expected list, got {type(highly_correlated_columns)}"
                 df = df.drop(highly_correlated_columns)
 
             if timeit:
@@ -506,7 +532,7 @@ class PlateMetadata:
         # now we have all data merged, and can start filerting, cleaning etc.
         
         # if present, use qc_df to filter out bad cells/images
-        if qc_df is not None:
+        if self.df_qc is not None:
             pass # TODO
 
         # for some reason, the site is parsed as float, even though it really should be an int
@@ -529,13 +555,13 @@ class PlateMetadata:
             num_metadata_site_entries_nonint=np.sum(np.abs(df['Metadata_Site']%1.0)>1e-6)
             assert num_metadata_site_entries_nonint==0, f"ERROR : {num_metadata_site_entries_nonint} imaging sites don't have integer indices. that should not be the case, and likely indicates a bug."
 
-            df['Metadata_Site']=df['Metadata_Site'].astype(np.dtype('int32'))
+            df['Metadata_Site']=df['Metadata_Site'].cast(pl.Int32)
 
         if timeit:
             print_time("processed some metadate")
 
         # [optional] investigate non-float columns
-        if show_non_float_columns and i_i==0:
+        if show_non_float_columns:
             column_dtypes=dict()
             for column in df.columns:
                 dtype=df[column].dtype
@@ -554,7 +580,7 @@ class PlateMetadata:
                 print_time("check out non-float columns")
 
         # discard columns with unused information
-        for col in df.columns:            
+        for col in df.columns:
             if is_meta_column(col):
                 if print_unused_columns:
                     print("unused column:",col)
@@ -619,7 +645,7 @@ class PlateMetadata:
                 if std[col].is_infinite().any():
                     raise RuntimeError(f"some std value in column {col,i} is infinite?!")
                 if (std[col]==0).any():
-                    raise RuntimeError(f"unexpected 0 in column {col}")
+                    raise RuntimeError(f"some std. dev. in column {col,i} is zero")
 
         if timeit:
             print_time("calculated DMSO distribution")
@@ -680,36 +706,31 @@ class PlateMetadata:
             print_time("added compound information")
 
         cpi = Plate(
-            image_plate_dir=self.image_plate_dir,
-            image_id=cp_plate_out_path,
-            pipeline_id_qc=str(pipeline_id_qc) if pipeline_id_qc else None,
-            pipeline_id_features=str(pipeline_id_features),
-            # '-1' because timepoints in the metadata file are 1-indexed, but 0-indexed in the filesystem
-            timepoint=str(int(cellprofiler_image_timepoints[i_i])-1),
+            plate_name=self.plate_name,
+            timepoint=self.time_point,
             combined_per_well=combined_per_well,
-            qc_df=qc_df,
+            qc_df=self.df_qc,
         )
         
         if timeit:
             print("first two entries of final dataframe:")
             display(combined_per_well.head(2))
 
-            print(f"{self.time_point=} {Path(cpi.image_plate_dir).name=}")
-            print_time(f"timepoint {Path(cpi.image_plate_dir).name} done")
+            print_time(f"timepoint {self.time_point} done")
 
         return cpi
 
 
 @dataclass
 class Plate:
-    timepoint:str
-    image_plate_dir:tp.Union[str,Path]
-    image_id:str
-    pipeline_id_qc:tp.Optional[str]
-    pipeline_id_features:str
-    """ timepoint as in path name (i.e. 0-indexed) """
+    timepoint:int
+    """ timepoint is 1-indexed here (1-indexed in metadata, but 0-indexed in filesystem)"""
+
+    plate_name:str
+    """ barcode or something like that """
     
     combined_per_well:pl.DataFrame
+    
     qc_df:tp.Optional[pl.DataFrame]=None
     
     def numeric_data(self)->pl.DataFrame:
@@ -774,7 +795,7 @@ class Plate:
                 #self.combined_per_well['compoundinfo_name'],
                 #self.combined_per_well['compound_batchid']
             ],
-            title=f'{method} of {Path(self.image_plate_dir).name}'
+            title=f'{method} of {self.plate_name}'
         )
 
         # remove margins
