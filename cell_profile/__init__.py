@@ -538,33 +538,12 @@ class PlateMetadata:
         else:
             raise ValueError(f"handle_unused_features is {handle_unused_features} but must be None or 'remove'")
         
-
-        # merge with qc data, if present
-        # TODO temporarily disabled
-        if False and self.df_qc is not None:
-            for c in self.df_qc.select(pl.col(pl.Utf8)).columns:
-                print(f"qc df col '{c}'")
-            for c in df.select(pl.col(pl.Utf8)).columns:
-                print(f"df col '{c}'")
-            
-            print(f"{self.df_qc.shape = }  {df.shape = }")
-            df=self.df_qc.join(
-                df,
-                how="inner",
-                left_on=metadata_cols,
-                right_on=metadata_cols,
-            )
-
-            if timeit:
-                print(f"num rows after qc+feature joining: {df.shape[0]}")
-                print_time("joined cytoplasm+nucleus+cells and qc data")
-
         if timeit:
             print_time("joining done")
 
         # now we have all data merged, and can start filerting, cleaning etc.
         
-        # if present, use self.df_qc to filter out bad cells/images
+        # if present, use self.df_qc to filter out bad images
         if self.df_qc is not None:
             pass # TODO
 
@@ -611,19 +590,6 @@ class PlateMetadata:
 
             if timeit:
                 print_time("check out non-float columns")
-
-        # discard columns with unused information
-        for col in df.columns:
-            meta_columns_to_drop:tp.List[str]=[]
-            if is_meta_column(col):
-                meta_columns_to_drop.append(col)
-                if print_unused_columns:
-                    print("unused column:",col)
-            assert len(meta_columns_to_drop)==0
-            df=df.drop(meta_columns_to_drop)
-
-        if timeit:
-            print_time("remove unused metadata")
 
         # drop all rows that contain nan
         num_rows_before_nan_trim=df.shape[0]
@@ -687,7 +653,7 @@ class PlateMetadata:
             print_time("calculated DMSO distribution")
 
         # normalize plate to DMSO distribution
-        df_normalized = (df.select(mu.columns)-mu)/std
+        df_normalized = df.with_columns([(pl.col(c) - mu[c]) / std[c] for c in mu.columns])
 
         if ensure_no_nan_or_inf:
             found_nan=False
