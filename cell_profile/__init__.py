@@ -214,7 +214,6 @@ class Experiment:
 
         valid_timepoints=[]
         for row in tqdm(cellprofiler_pipelines.rows(named=True)):
-            i_path=Path(row["image_dir"])
             time_point=int(row["timepoint"])
             image_plate_dir=Path(row["image_dir"])
 
@@ -238,7 +237,7 @@ class Experiment:
                     f"though {num_images_per_timepoint} were expected")
 
             valid_timepoints.append(PlateMetadata(
-                time_point=time_point,
+                time_point_index=time_point,
                 plate_name=Path(image_plate_dir).name,
             ))
 
@@ -248,10 +247,13 @@ class Experiment:
 @dataclass
 class PlateMetadata:
     
-    time_point: int
-    """ time_point is 1-indexed (!) """
+    time_point_index: int
+    """ time_point index is 1-indexed (!) """
     plate_name: str
     """ name of this plate, e.g. barcode """
+
+    time_point:tp.Optional[int]=None
+    """ time_point is 0-indexed (!) """
 
     feature_files:tp.Dict[str,pl.DataFrame]=dc.field(default_factory=dict)
 
@@ -285,9 +287,11 @@ class PlateMetadata:
         cellprofiler_image_timepoints:tp.List[str]=cellprofiler_pipelines["timepoint"].to_list()
         
         # not sure anymore why this is necessary, but it is
-        plate_timepoint=int(cellprofiler_image_timepoints[self.time_point-1])
+        self.time_point=int(cellprofiler_image_timepoints[self.time_point_index-1])
 
-        current_pipeline=cellprofiler_pipelines.filter(pl.col("timepoint")==str(self.time_point)).rows(named=True)[0]
+        current_pipeline=cellprofiler_pipelines.filter(
+            pl.col("timepoint")==str(self.time_point)
+        ).rows(named=True)[0]
 
         cp_plate_out_path=cellprofiler_output_path/current_pipeline["plate_id"]
 
@@ -295,7 +299,9 @@ class PlateMetadata:
         if current_pipeline["pipeline_id_qc"]:
             pipeline_id_qc=cp_plate_out_path/current_pipeline["pipeline_id_qc"]
 
-            qc_raw_filepath=list(Path(pipeline_id_qc).glob("qcRAW_images*.parquet"))[0]
+            qc_raw_filepath=list(
+                Path(pipeline_id_qc).glob("qcRAW_images*.parquet")
+            )[0]
             self.df_qc_images=pl.read_parquet(qc_raw_filepath)
             # print(f"{self.df_qc_images.shape = }")
             
@@ -303,15 +309,32 @@ class PlateMetadata:
             if False:
                 # filter out images with any qc flag set:
                 # qc_flag_raw*, etc. qc_flag_rawACTIN_Blurred, *_Blurry, *_Saturated
-                qc_flag_cols=[x for x in self.df_qc_images.columns if x.startswith("qc_flag_raw")]
+                qc_flag_cols=[
+                    x for x in self.df_qc_images.columns
+                    if x.startswith("qc_flag_raw")
+                ]
                 # print(f"{qc_flag_cols = }")
-                self.df_qc_images=self.df_qc_images.filter(pl.sum_horizontal(pl.col([c for c in qc_flag_cols if c.endswith("_Blurred")])) == 0)
-                self.df_qc_images=self.df_qc_images.filter(pl.sum_horizontal(pl.col([c for c in qc_flag_cols if c.endswith("_Blurry")])) == 0)
+                self.df_qc_images=self.df_qc_images.filter(
+                    pl.sum_horizontal(
+                        pl.col([
+                            c for c in qc_flag_cols
+                            if c.endswith("_Blurred")])
+                    ) == 0
+                )
+                self.df_qc_images=self.df_qc_images.filter(
+                    pl.sum_horizontal(
+                        pl.col([
+                            c for c in qc_flag_cols
+                            if c.endswith("_Blurry")])
+                    ) == 0
+                )
                 display(self.df_qc_images.select(qc_flag_cols).sum())
                 print(f"(after flag filter) {self.df_qc_images.shape = }")
                 display(self.df_qc_images.head(2))
 
-            qc_nuclei_filename_list=list(Path(pipeline_id_qc).glob("qcRAW_nuclei*.parquet"))
+            qc_nuclei_filename_list=list(
+                Path(pipeline_id_qc).glob("qcRAW_nuclei*.parquet")
+            )
             assert len(qc_nuclei_filename_list)==1, f"expected exactly one nuclei file, but found {len(qc_nuclei_filename_list)}"
             qc_nuclei_filename=qc_nuclei_filename_list[0]
             self.df_qc_nuclei=pl.read_parquet(qc_nuclei_filename)
@@ -325,14 +348,26 @@ class PlateMetadata:
                 print("self.df_qc_images")
                 # list all columns with str datatype
                 print("str cols")
-                print("\n".join([f"  {c}" for c in self.df_qc_images.columns if self.df_qc_images[c].dtype==pl.Utf8]))
+                print("\n".join([
+                    f"  {c}" for c in self.df_qc_images.columns
+                    if self.df_qc_images[c].dtype==pl.Utf8]
+                ))
                 print("metadata cols")
-                print("\n".join([f"  {c}" for c in self.df_qc_images.columns if c.startswith("Metadata_")]))
+                print("\n".join([
+                    f"  {c}" for c in self.df_qc_images.columns
+                    if c.startswith("Metadata_")]
+                ))
                 print("self.df_qc_nuclei")
                 print("str cols")
-                print("\n".join([f"  {c}" for c in self.df_qc_nuclei.columns if self.df_qc_nuclei[c].dtype==pl.Utf8]))
+                print("\n".join([
+                    f"  {c}" for c in self.df_qc_nuclei.columns
+                    if self.df_qc_nuclei[c].dtype==pl.Utf8]
+                ))
                 print("metadata cols")
-                print("\n".join([f"  {c}" for c in self.df_qc_images.columns if c.startswith("Metadata_")]))
+                print("\n".join([
+                    f"  {c}" for c in self.df_qc_images.columns
+                    if c.startswith("Metadata_")]
+                ))
 
             qc_df=self.df_qc_images.join(
                 self.df_qc_nuclei,
@@ -360,7 +395,10 @@ class PlateMetadata:
 
             # add prefix to columns names because pd.merge renames the column names if they collide
             f_df=pl.read_parquet(f)
-            f_df=f_df.rename({x:f'{feature_set_name}_{x}' for x in f_df.columns if not x.startswith("Metadata_")})
+            f_df=f_df.rename({
+                x:f'{feature_set_name}_{x}' for x in f_df.columns
+                if not x.startswith("Metadata_")
+            })
 
             self.feature_files[feature_set_name]=f_df
 
@@ -380,7 +418,7 @@ class PlateMetadata:
         show_non_float_columns:bool=False,
         ensure_no_nan_or_inf:bool=False,
         
-        handle_unused_features:tp.Optional[str]=None,
+        handle_unused_features:tp.Optional[tp.Literal["remove"]]=None,
         unused_feature_threshold_std:float=0.0001,
         
         print_unused_columns:bool=False,
@@ -410,7 +448,9 @@ class PlateMetadata:
                 check often that no column contains NaN/inf valued float entries 
             handle_unused_features:
                 what to do with features that are highly correlated or have a std. dev. of zero
-                can be None (to not do anything) or 'remove' (to remove them)
+                can be:
+                    - None : do not treat them in a special way
+                    - "remove" : remove them
                 
                 note: in one test, this reduced the number of features from 1800 to 1100.
         """
@@ -701,6 +741,8 @@ class PlateMetadata:
         if timeit:
             print_time("added compound information")
 
+        assert self.time_point is not None, "time_point is None, but should be set"
+
         cpi = Plate(
             plate_name=self.plate_name,
             timepoint=self.time_point,
@@ -720,7 +762,7 @@ class PlateMetadata:
 @dataclass
 class Plate:
     timepoint:int
-    """ timepoint is 1-indexed here (1-indexed in metadata, but 0-indexed in filesystem)"""
+    """ timepoint is 0-indexed here (1-indexed in metadata, but 0-indexed in filesystem)"""
 
     plate_name:str
     """ barcode or something like that """
