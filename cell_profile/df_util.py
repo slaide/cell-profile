@@ -61,10 +61,10 @@ def is_meta_column(
 
 
 def remove_highly_correlated(
-    df:pd.DataFrame, 
+    df:pl.DataFrame,
     threshold=0.9, 
     remove_inplace:bool=True
-)->tp.Union[tp.List[str],pd.DataFrame]:
+)->tp.Union[tp.List[str],pl.DataFrame]:
     """
         remove columns that are highly correlated with each other
 
