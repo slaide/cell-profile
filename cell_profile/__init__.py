@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import dataclasses as dc
 from pathlib import Path
 import typing as tp
 import os
@@ -252,16 +253,16 @@ class PlateMetadata:
     plate_name: str
     """ name of this plate, e.g. barcode """
 
-    feature_files:tp.Dict[str,pl.DataFrame]={}
+    feature_files:tp.Dict[str,pl.DataFrame]=dc.field(default_factory=dict)
 
-    metadata_cols:tp.List[str]=[
+    metadata_cols:tp.List[str]=dc.field(default_factory=lambda:[
         "Metadata_AcqID",
         "Metadata_Barcode",
         "Metadata_Well",
         "Metadata_Site"
-    ]
+    ])
 
-    feature_set_names: tp.List[str]=['cytoplasm','nuclei','cells']
+    feature_set_names: tp.List[str]=dc.field(default_factory=lambda:['cytoplasm','nuclei','cells'])
     # the prefix is used later on by itself
     feature_file_prefix: str='featICF_'
 
