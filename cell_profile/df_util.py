@@ -188,16 +188,20 @@ def handle_outliers(
     assert (min_value>max_value).sum().to_numpy()[0,0]==0
 
     if method=="clip":
+        col_clip_exprs:tp.List[pl.Expr]=[]
         for col in columns:
-            df = df.with_columns(
+            col_clip_exprs.append(
                 pl.col(col).clip(lower_bound=min_value[col],upper_bound=max_value[col])
             )
+        df = df.with_columns(col_clip_exprs)
 
     elif method=="remove":
+        col_remove_exprs:tp.List[pl.Expr]=[]
         for col in columns:
-            df = df.filter(
+            col_remove_exprs.append(
                 (pl.col(col) > min_value[col]) & (pl.col(col) < max_value[col])
             )
+        df = df.filter(col_remove_exprs)
 
     else:
         raise RuntimeError(f"unknown method {method} (valid methods are {handle_outliers.__annotations__['method'].__args__})")
@@ -206,8 +210,10 @@ def handle_outliers(
 
 def remove_nans(df:pl.DataFrame,columns:tp.List[str])->pl.DataFrame:
     """ remove those rows that contain NaN in any of the provided columns """
-    num_rows_before_nan_trim=df.shape[0]
+    filter_exprs:tp.List[pl.Expr]=[]
     for col in df.select(columns).columns:
-        df=df.filter(pl.col(col).is_not_null())
+        filter_exprs.append(pl.col(col).is_not_null())
+
+    df=df.filter(filter_exprs)
         
     return df

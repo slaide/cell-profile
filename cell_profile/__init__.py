@@ -515,7 +515,9 @@ class PlateMetadata:
             # remove columns with std dev <= unused_feature_threshold_std
             unused_cols=[]
             for col in df.select(float_columns).columns:
-                if df.select(pl.col(col).std()).to_numpy()[0][0] <= unused_feature_threshold_std:
+                col_std=df.select(pl.col(col).std()).to_numpy()
+                assert col_std.shape==(1,1), col_std.shape
+                if col_std[0][0] <= unused_feature_threshold_std:
                     unused_cols.append(col)
 
             df = df.drop(unused_cols)
