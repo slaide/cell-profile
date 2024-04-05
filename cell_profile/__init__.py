@@ -351,10 +351,7 @@ class PlateMetadata:
 
         pipeline_id_features=cp_plate_out_path/current_pipeline["pipeline_id_feat"]
 
-        feature_files=dict()
-
         feature_parquet_files=Path(pipeline_id_features).glob("*.parquet")
-        feature_set_cellcount={}
         for f in sorted(feature_parquet_files):
             if not Path(f).stem in self.feature_filenames:
                 continue
@@ -365,15 +362,13 @@ class PlateMetadata:
             f_df=pl.read_parquet(f)
             f_df=f_df.rename({x:f'{feature_set_name}_{x}' for x in f_df.columns if not x.startswith("Metadata_")})
 
-            feature_files[feature_set_name]=f_df
+            self.feature_files[feature_set_name]=f_df
 
             if timeit:
                 print(f"num entries in {feature_set_name} is {f_df.shape}")
 
-            feature_set_cellcount[feature_set_name]=f_df.shape[0]
-
         if timeit:
-            print_time("read files")
+            print_time("reading feature files dones")
     
     def process(
         self,
