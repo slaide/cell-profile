@@ -496,14 +496,14 @@ class PlateMetadata:
             print_time(s)
 
         # convert all *_ImageNumber columns to int
+        column_names_to_convert_to_int:tp.List[str]=[]
         for col in df.columns:
-            convert_col_to_int=False
             for suffix in ["_ImageNumber","_Number_Object_Number"]:
                 if col.endswith(suffix):
-                    convert_col_to_int=True
+                    column_names_to_convert_to_int.append(col)
 
-            if convert_col_to_int:
-                df=df.with_columns(pl.col(col).cast(pl.Int32))
+        if len(column_names_to_convert_to_int)>0:
+            df=df.with_columns(pl.col(column_names_to_convert_to_int).cast(pl.Int32))
 
         if timeit:
             print_time("converted some columns from f64 to i32")
@@ -614,10 +614,13 @@ class PlateMetadata:
 
         # discard columns with unused information
         for col in df.columns:
+            meta_columns_to_drop:tp.List[str]=[]
             if is_meta_column(col):
+                meta_columns_to_drop.append(col)
                 if print_unused_columns:
                     print("unused column:",col)
-                df=df.drop(col)
+            assert len(meta_columns_to_drop)==0
+            df=df.drop(meta_columns_to_drop)
 
         if timeit:
             print_time("remove unused metadata")
@@ -684,12 +687,14 @@ class PlateMetadata:
             print_time("calculated DMSO distribution")
 
         # normalize plate to DMSO distribution
-        df_normalized = df.with_columns([(pl.col(c) - mu[c]) / std[c] for c in mu.columns])
+        df_normalized = (df.select(mu.columns)-mu)/std
 
         if ensure_no_nan_or_inf:
             found_nan=False
-            for i,col in enumerate(mu.columns):
-                if df_normalized[col].is_null().any():
+            mu_null_check=df_normalized.select(pl.col(df_normalized.columns).is_null().any())
+            assert mu_null_check.shape == (1,df_normalized.shape[1]), f"expected one row, got {mu_null_check.shape[0]}"
+            for col in mu.columns:
+                if df_normalized.item(row=0,column=col) == True:
                     found_nan=True
                     print(f"some value in column {col,i} is nan")
 
@@ -784,9 +789,10 @@ class Plate:
         """
 
         df=self.numeric_data()
+        column_is_null_check=df.select(pl.col(df.columns).is_null().any())
+        assert column_is_null_check.shape == (1,df.shape[1]), f"expected one row, got {column_is_null_check.shape[0]}"
         for column in df.columns:
-            column_is_null_check:bool=df.select(pl.col(column).is_null().any()).item(0,0)
-            if column_is_null_check:
+            if column_is_null_check.item(row=0,column=column)==True:
                 raise RuntimeError(f"there is a nan value in column {column}")
 
         if method=="pca":
