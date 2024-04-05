@@ -1,21 +1,7 @@
 from pathlib import Path
-import os
 import typing as tp
 
-import numpy as np
-import polars as pl # like pandas, but much faster
-# import polars.selectors as cs
-import pandas as pd # still needed to parse excel files
-import plotly
-import plotly.express as px
-import umap
-
-from IPython.display import display
-from sklearn.decomposition import PCA
-
-os.chdir("/home/username/myproject/code")
-from cell_profile import tqdm, print, print_time
-from cell_profile import Experiment, Plate
+from cell_profile import Experiment, display
 
 # load experiment metadata
 
