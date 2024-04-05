@@ -62,7 +62,7 @@ def is_meta_column(
 
 def remove_highly_correlated(
     df:pl.DataFrame,
-    threshold=0.9, 
+    threshold:float=0.9,
     remove_inplace:bool=True
 )->tp.Union[tp.List[str],pl.DataFrame]:
     """
@@ -208,7 +208,7 @@ def handle_outliers(
         
     return df
 
-def df_checkNull(df:pl.DataFrame)->tp.List[str]:
+def df_checkNull(df:pl.DataFrame,raise_:bool=False)->tp.List[str]:
     null_check=df.select(pl.col(df.columns).is_null().any())
     assert null_check.shape == (1,df.shape[1]), f"expected one row, got {null_check.shape[0]}"
 
@@ -216,10 +216,15 @@ def df_checkNull(df:pl.DataFrame)->tp.List[str]:
     for i,col in enumerate(df.columns):
         if null_check.item(row=0,column=col)==True:
             ret.append(col)
+
+    if raise_ and len(ret)>0:
+        for col in ret:
+            print(f"some value in column {col} is null")
+        raise RuntimeError("some value is null")
         
     return ret
 
-def df_checkValue(df:pl.DataFrame,value:float)->tp.List[str]:
+def df_checkValue(df:pl.DataFrame,value:float,raise_:bool=False)->tp.List[str]:
     value_check=df.select((pl.col(df.columns)==value).any())
     assert value_check.shape == (1,df.shape[1]), f"expected one row, got {value_check.shape[0]}"
     
@@ -227,10 +232,15 @@ def df_checkValue(df:pl.DataFrame,value:float)->tp.List[str]:
     for i,col in enumerate(df.columns):
         if value_check.item(row=0,column=col)==True:
             ret.append(col)
+
+    if raise_ and len(ret)>0:
+        for col in ret:
+            print(f"some value in column {col} has target value ({value})")
+        raise RuntimeError(f"some value is {value}")
         
     return ret
 
-def df_checkInf(df:pl.DataFrame)->tp.List[str]:
+def df_checkInf(df:pl.DataFrame,raise_:bool=False)->tp.List[str]:
     inf_check=df.select(pl.col(df.columns).is_infinite().any())
     assert inf_check.shape == (1,df.shape[1]), f"expected one row, got {inf_check.shape[0]}"
     
@@ -238,6 +248,27 @@ def df_checkInf(df:pl.DataFrame)->tp.List[str]:
     for i,col in enumerate(df.columns):
         if inf_check.item(row=0,column=col)==True:
             ret.append(col)
+
+    if raise_ and len(ret)>0:
+        for col in ret:
+            print(f"some value in column {col} is inf")
+        raise RuntimeError("some value is inf")
+        
+    return ret
+
+def df_checkNaN(df:pl.DataFrame,raise_:bool=False)->tp.List[str]:
+    nan_check=df.select(pl.col(df.columns).is_nan().any())
+    assert nan_check.shape == (1,df.shape[1]), f"expected one row, got {nan_check.shape[0]}"
+    
+    ret=[]
+    for i,col in enumerate(df.columns):
+        if nan_check.item(row=0,column=col)==True:
+            ret.append(col)
+
+    if raise_ and len(ret)>0:
+        for col in ret:
+            print(f"some value in column {col} is nan")
+        raise RuntimeError("some value is nan")
         
     return ret
 

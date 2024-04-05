@@ -15,7 +15,7 @@ import umap
 
 from .df_util import is_meta_column, handle_outliers, remove_nans, \
         remove_highly_correlated, Sigma, Quantile, \
-        df_checkNull, df_checkValue, df_checkInf
+        df_checkNull, df_checkValue, df_checkInf, df_checkNaN
 
 from .misc import display, print, print_time, tqdm
 
@@ -151,7 +151,9 @@ class Experiment:
             raise e
 
         # all columns contain essentially non-numerical data, so make sure the datatype is proper string
-        cellprofiler_pipelines=cellprofiler_pipelines.cast({x:pl.Utf8 for x in cellprofiler_pipelines.columns})
+        cellprofiler_pipelines=cellprofiler_pipelines.cast({
+            x:pl.Utf8 for x in cellprofiler_pipelines.columns
+        })
 
         return cellprofiler_pipelines
 
@@ -194,7 +196,8 @@ class Experiment:
             return compound_layout
         else:
             source_file=Path(source)
-            assert source_file.exists(), f"compound layout source file '{source}' does not exist (current directory is {os.getcwd()})"
+            assert source_file.exists(), f"""compound layout source file '{
+                source}' does not exist (current directory is {os.getcwd()})"""
 
             file_default_colnames_ret:list="well_id pert_type".split(" ")
             if file_colnames_ret is None:
@@ -342,7 +345,8 @@ class PlateMetadata:
             qc_nuclei_filename_list=list(
                 Path(pipeline_id_qc).glob("qcRAW_nuclei*.parquet")
             )
-            assert len(qc_nuclei_filename_list)==1, f"expected exactly one nuclei file, but found {len(qc_nuclei_filename_list)}"
+            assert len(qc_nuclei_filename_list)==1, f"expected exactly one nuclei file, " \
+                f"but found {len(qc_nuclei_filename_list)}"
             qc_nuclei_filename=qc_nuclei_filename_list[0]
             self.df_qc_nuclei=pl.read_parquet(qc_nuclei_filename)
             # print(f"{self.df_qc_nuclei.shape = }")
@@ -393,7 +397,7 @@ class PlateMetadata:
 
         pipeline_id_features=cp_plate_out_path/current_pipeline["pipeline_id_feat"]
 
-        feature_parquet_files=Path(pipeline_id_features).glob("*.parquet")
+        feature_parquet_files=list(Path(pipeline_id_features).glob("*.parquet"))
         for f in sorted(feature_parquet_files):
             if not Path(f).stem in self.feature_filenames:
                 continue
@@ -430,6 +434,7 @@ class PlateMetadata:
         unused_feature_threshold_std:float=0.0001,
         
         remove_correlated:bool=False,
+        remove_correlation_threshold:float=0.9,
 
         pre_normalize_clip_method:tp.Optional[dict]=None,
         post_normalize_clip_method:tp.Optional[dict]=None,
@@ -444,12 +449,22 @@ class PlateMetadata:
             ensure_no_nan_or_inf:
                 check often that no column contains NaN/inf valued float entries 
             handle_unused_features:
-                what to do with features that are highly correlated or have a std. dev. of zero
+                what to do with features that are highly correlated or have a
+                std. dev. below unused_feature_threshold_std
+
                 can be:
                     - None : do not treat them in a special way
                     - "remove" : remove them
                 
                 note: in one test, this reduced the number of features from 1800 to 1100.
+            
+            remove_correlated:
+                remove highly correlated features
+
+                features with correlation > remove_correlation_threshold are removed
+
+                out of the pair of columns with high correlation, the specific choice of
+                column to remove is arbitrary
         """
 
         if timeit:
@@ -489,7 +504,10 @@ class PlateMetadata:
 
         df=df.drop([c for c in df.columns if is_meta_column(c)])
         if self.df_qc is not None:
-            self.df_qc=self.df_qc.drop([c for c in self.df_qc.columns if is_meta_column(c)])
+            self.df_qc=self.df_qc.drop([
+                c for c in self.df_qc.columns
+                if is_meta_column(c)
+            ])
 
         if timeit:
             s=f"dropped unused metadata {df.shape = }"
@@ -505,7 +523,9 @@ class PlateMetadata:
                     column_names_to_convert_to_int.append(col)
 
         if len(column_names_to_convert_to_int)>0:
-            df=df.with_columns(pl.col(column_names_to_convert_to_int).cast(pl.Int32))
+            df=df.with_columns(
+                pl.col(column_names_to_convert_to_int).cast(pl.Int32)
+            )
 
         if timeit:
             print_time("converted some columns from f64 to i32")
@@ -526,14 +546,22 @@ class PlateMetadata:
 
             # remove highly correlated features
             if remove_correlated:
-                highly_correlated_columns = remove_highly_correlated(df.select(float_columns),remove_inplace=False)
-                assert type(highly_correlated_columns)==list, f"expected list, got {type(highly_correlated_columns)}"
+                highly_correlated_columns = remove_highly_correlated(
+                    df.select(float_columns),
+                    threshold=remove_correlation_threshold,
+                    remove_inplace=False
+                )
+                assert type(highly_correlated_columns)==list, f"expected list, got {
+                    type(highly_correlated_columns)
+                }"
                 df = df.drop(highly_correlated_columns)
 
             if timeit:
                 print_time(
                     "removed columns with high correlation" \
-                    f"Number of columns after removing sigma<={unused_feature_threshold_std} and highly correlated: {df.shape[1]}"
+                    f"""Number of columns after removing sigma<={
+                        unused_feature_threshold_std
+                    } and highly correlated: {df.shape[1]}"""
                 )
         elif handle_unused_features is None:
             pass
@@ -567,7 +595,9 @@ class PlateMetadata:
                 df=df[~(site_is_inf_mask|site_is_nan_mask)]
 
             num_metadata_site_entries_nonint=np.sum(np.abs(df['Metadata_Site']%1.0)>1e-6)
-            assert num_metadata_site_entries_nonint==0, f"ERROR : {num_metadata_site_entries_nonint} imaging sites don't have integer indices. that should not be the case, and likely indicates a bug."
+            assert num_metadata_site_entries_nonint==0, f"""ERROR : {
+                num_metadata_site_entries_nonint
+            } imaging sites don't have integer indices. that should not be the case, and likely indicates a bug."""
 
             df['Metadata_Site']=df['Metadata_Site'].cast(pl.Int32)
 
@@ -618,12 +648,18 @@ class PlateMetadata:
         # use join to quickly select the relevant rows
         # but add unique prefix to compound information columns (to avoid name collisions)
         df_DMSO = df.join(
-            wells_with_dmso.rename({x:f"compoundinfo_{x}" for x in wells_with_dmso.columns}),
+            wells_with_dmso.rename({
+                x:f"compoundinfo_{x}"
+                for x in wells_with_dmso.columns
+            }),
             left_on='Metadata_Well',
             right_on='compoundinfo_compound_well_id')
         
         # then remove the compound information columns again
-        df_DMSO = df_DMSO.select([x for x in df_DMSO.columns if not x.startswith('compoundinfo_')])
+        df_DMSO = df_DMSO.select([
+            x for x in df_DMSO.columns
+            if not x.startswith('compoundinfo_')
+        ])
         # ensure there is sufficient data on the DMSO wells
         assert df_DMSO.shape[0]>0, "error!"
 
@@ -631,41 +667,23 @@ class PlateMetadata:
         mu = df_DMSO.select(float_columns).mean()
 
         if ensure_no_nan_or_inf:
-            colsWithZeroEntry=df_checkNull(mu)
-            if len(colsWithZeroEntry)>0:
-                for col in colsWithZeroEntry:
-                    print(f"some mean value in column {col} is nan")
-                raise RuntimeError("some mean value is nan")
-
-            colsWithInfEntry=df_checkInf(mu)
-            if len(colsWithInfEntry)>0:
-                for col in colsWithInfEntry:
-                    print(f"some mean value in column {col} is inf")
-                raise RuntimeError("some mean value is inf")
+            df_checkNull(mu,raise_=True)
+            df_checkInf(mu,raise_=True)
+            df_checkNaN(mu,raise_=True)
 
         # calculate stdandard deviation of DMSO morphology features
         std = df_DMSO.select(float_columns).std()
         # replace 0 with 1 (specifically not clip) to avoid div by zero
-        std = std.select([pl.col(c).map_dict({0: 1}, default=pl.first()) for c in std.columns])
+        std = std.select([
+            pl.col(c).map_dict({0: 1}, default=pl.first())
+            for c in std.columns
+        ])
         
         if ensure_no_nan_or_inf:
-            colsWithInfEntry=df_checkInf(std)
-            if len(colsWithInfEntry)>0:
-                for col in colsWithInfEntry:
-                    print(f"some std value in column {col} is inf")
-                raise RuntimeError("some std value is inf")
-            
-            colsWithNullEntry=df_checkNull(std)
-            if len(colsWithNullEntry)>0:
-                for col in colsWithNullEntry:
-                    print(f"some std value in column {col} is null")
-                raise RuntimeError("some std value is null")
-            
-            colsWithZeroEntry=df_checkValue(std,0)
-            if len(colsWithZeroEntry)>0:
-                for col in colsWithZeroEntry:
-                    print(f"some std value in column {col} is zero")
-                raise RuntimeError("some std value is zero")
+            df_checkInf(std,raise_=True)
+            df_checkNull(std,raise_=True)
+            df_checkNaN(std,raise_=True)
+            df_checkValue(std,0,raise_=True)
 
         if timeit:
             print_time("calculated DMSO distribution")
@@ -676,17 +694,9 @@ class PlateMetadata:
         )
 
         if ensure_no_nan_or_inf:
-            colsWithInfEntry=df_checkInf(df_normalized)
-            if len(colsWithInfEntry)>0:
-                for col in colsWithInfEntry:
-                    print(f"some df_normalized value in column {col} is inf")
-                raise RuntimeError("some df_normalized value is inf")
-            
-            colsWithNullEntry=df_checkNull(df_normalized)
-            if len(colsWithNullEntry)>0:
-                for col in colsWithNullEntry:
-                    print(f"some df_normalized value in column {col} is null")
-                raise RuntimeError("some df_normalized value is null")
+            df_checkInf(df_normalized,raise_=True)
+            df_checkNull(df_normalized,raise_=True)
+            df_checkNaN(df_normalized,raise_=True)
 
         # write back (into dataframe containing additional columns)
         df=df.with_columns([df_normalized[c] for c in df_normalized.columns])
@@ -707,26 +717,38 @@ class PlateMetadata:
 
         fraction_objects_containing_nan=1-(num_rows_after_nan_trim/num_rows_before_nan_trim)
         if timeit:
-            print_time(f"num objects (cells) {num_objects} ({(fraction_objects_containing_nan*100):.2f}% were NaN)")
+            print_time(f"""num objects (cells) {num_objects} ({
+                (fraction_objects_containing_nan*100):.2f
+            }% were NaN)""")
 
         # group/combine by well
+
         df=df.drop(columns=['Metadata_Site']) # should be redundant
-        df_float_columns=set(list(df.select(float_columns).columns))
-        # group_by_columns=['Metadata_Barcode','Metadata_Well'] # this code was here at some point, but it does not make sense because the barcode is the same for all wells...?
+        df_float_columns=set(df.select(float_columns).columns)
         group_by_columns=['Metadata_Well']
-        other_columns=set(list(df.columns))-df_float_columns-set(group_by_columns)
+        other_columns=set(df.columns) \
+            - df_float_columns \
+            - set(group_by_columns)
+        
         # group by mean for all float features, and group by first for all non-float columns (indices and string metadata)
         group_by_aggregates=[
             *[pl.mean(x) for x in list(df_float_columns)],
             *[pl.first(x) for x in list(other_columns)]
         ]
+
         combined_per_well=df.group_by(group_by_columns).agg(group_by_aggregates)
 
         if timeit:
             print_time("binned data per well")
 
         # add compound information
-        combined_per_well=combined_per_well.join(compound_layout,how='left',left_on=["Metadata_Well"],right_on=["compound_well_id"])
+        combined_per_well=combined_per_well.join(
+            compound_layout,
+            how='left',
+            left_on=["Metadata_Well"],
+            right_on=["compound_well_id"]
+        )
+
         if timeit:
             print_time("added compound information")
 
@@ -776,11 +798,10 @@ class Plate:
         """
 
         df=self.numeric_data()
-        column_is_null_check=df.select(pl.col(df.columns).is_null().any())
-        assert column_is_null_check.shape == (1,df.shape[1]), f"expected one row, got {column_is_null_check.shape[0]}"
-        for column in df.columns:
-            if column_is_null_check.item(row=0,column=column)==True:
-                raise RuntimeError(f"there is a nan value in column {column}")
+
+        df_checkNull(df,raise_=True)
+        df_checkInf(df,raise_=True)
+        df_checkNaN(df,raise_=True)
 
         if method=="pca":
             n_components=2
@@ -790,7 +811,9 @@ class Plate:
             if print_feature_pca_fraction:
                 # Get the loadings and calculate squared loadings for variance contribution
                 loadings = pca_red.components_.T * np.sqrt(pca_red.explained_variance_)
-                squared_loadings = pd.DataFrame(loadings**2, columns=[f'PC{i+1}' for i in range(n_components)], index=df.columns)
+                squared_loadings = pd.DataFrame(loadings**2, columns=[
+                    f'PC{i+1}' for i in range(n_components)
+                ], index=df.columns)
 
                 # For each PC, get the top 5 contributing features
                 top_contributors = {}
