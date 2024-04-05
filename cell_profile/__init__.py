@@ -13,7 +13,10 @@ import plotly.express as px
 from sklearn.decomposition import PCA
 import umap
 
-from .df_util import is_meta_column, handle_outliers, remove_nans, remove_highly_correlated, Sigma, Quantile
+from .df_util import is_meta_column, handle_outliers, remove_nans, \
+        remove_highly_correlated, Sigma, Quantile, \
+        df_checkNull, df_checkValue, df_checkInf
+
 from .misc import display, print, print_time, tqdm
 
 float_columns=[pl.col(pl.Float32),pl.col(pl.Float64)]
@@ -426,7 +429,6 @@ class PlateMetadata:
         handle_unused_features:tp.Optional[tp.Literal["remove"]]=None,
         unused_feature_threshold_std:float=0.0001,
         
-        print_unused_columns:bool=False,
         remove_correlated:bool=False,
 
         pre_normalize_clip_method:tp.Optional[dict]=None,
@@ -629,43 +631,62 @@ class PlateMetadata:
         mu = df_DMSO.select(float_columns).mean()
 
         if ensure_no_nan_or_inf:
-            for i,col in enumerate(mu.columns):
-                if mu[col].is_null().any():
-                    raise RuntimeError(f"some mean value in column {col,i} is nan?!")
-                if mu[col].is_infinite().any():
-                    raise RuntimeError(f"some mean value in column {col,i} is infinite?!")
+            colsWithZeroEntry=df_checkNull(mu)
+            if len(colsWithZeroEntry)>0:
+                for col in colsWithZeroEntry:
+                    print(f"some mean value in column {col} is nan")
+                raise RuntimeError("some mean value is nan")
+
+            colsWithInfEntry=df_checkInf(mu)
+            if len(colsWithInfEntry)>0:
+                for col in colsWithInfEntry:
+                    print(f"some mean value in column {col} is inf")
+                raise RuntimeError("some mean value is inf")
 
         # calculate stdandard deviation of DMSO morphology features
         std = df_DMSO.select(float_columns).std()
         # replace 0 with 1 (specifically not clip) to avoid div by zero
-        std = std.select([pl.col(c).map_dict({0: 1}, default=pl.col(c)) for c in std.columns])
+        std = std.select([pl.col(c).map_dict({0: 1}, default=pl.first()) for c in std.columns])
         
         if ensure_no_nan_or_inf:
-            for i,col in enumerate(std.columns):
-                if std[col].is_null().any():
-                    raise RuntimeError(f"some std value in column {col,i} is nan?!")
-                if std[col].is_infinite().any():
-                    raise RuntimeError(f"some std value in column {col,i} is infinite?!")
-                if (std[col]==0).any():
-                    raise RuntimeError(f"some std. dev. in column {col,i} is zero")
+            colsWithInfEntry=df_checkInf(std)
+            if len(colsWithInfEntry)>0:
+                for col in colsWithInfEntry:
+                    print(f"some std value in column {col} is inf")
+                raise RuntimeError("some std value is inf")
+            
+            colsWithNullEntry=df_checkNull(std)
+            if len(colsWithNullEntry)>0:
+                for col in colsWithNullEntry:
+                    print(f"some std value in column {col} is null")
+                raise RuntimeError("some std value is null")
+            
+            colsWithZeroEntry=df_checkValue(std,0)
+            if len(colsWithZeroEntry)>0:
+                for col in colsWithZeroEntry:
+                    print(f"some std value in column {col} is zero")
+                raise RuntimeError("some std value is zero")
 
         if timeit:
             print_time("calculated DMSO distribution")
 
         # normalize plate to DMSO distribution
-        df_normalized = df.with_columns([(pl.col(c) - mu[c]) / std[c] for c in mu.columns])
+        df_normalized = df.with_columns(
+            (pl.col(mu.columns) - mu) / std
+        )
 
         if ensure_no_nan_or_inf:
-            found_nan=False
-            mu_null_check=df_normalized.select(pl.col(df_normalized.columns).is_null().any())
-            assert mu_null_check.shape == (1,df_normalized.shape[1]), f"expected one row, got {mu_null_check.shape[0]}"
-            for col in mu.columns:
-                if df_normalized.item(row=0,column=col) == True:
-                    found_nan=True
-                    print(f"some value in column {col,i} is nan")
-
-            if found_nan:
-                raise RuntimeError("found nan")
+            colsWithInfEntry=df_checkInf(df_normalized)
+            if len(colsWithInfEntry)>0:
+                for col in colsWithInfEntry:
+                    print(f"some df_normalized value in column {col} is inf")
+                raise RuntimeError("some df_normalized value is inf")
+            
+            colsWithNullEntry=df_checkNull(df_normalized)
+            if len(colsWithNullEntry)>0:
+                for col in colsWithNullEntry:
+                    print(f"some df_normalized value in column {col} is null")
+                raise RuntimeError("some df_normalized value is null")
 
         # write back (into dataframe containing additional columns)
         df=df.with_columns([df_normalized[c] for c in df_normalized.columns])

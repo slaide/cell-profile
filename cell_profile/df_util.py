@@ -208,6 +208,39 @@ def handle_outliers(
         
     return df
 
+def df_checkNull(df:pl.DataFrame)->tp.List[str]:
+    null_check=df.select(pl.col(df.columns).is_null().any())
+    assert null_check.shape == (1,df.shape[1]), f"expected one row, got {null_check.shape[0]}"
+
+    ret=[]
+    for i,col in enumerate(df.columns):
+        if null_check.item(row=0,column=col)==True:
+            ret.append(col)
+        
+    return ret
+
+def df_checkValue(df:pl.DataFrame,value:float)->tp.List[str]:
+    value_check=df.select((pl.col(df.columns)==value).any())
+    assert value_check.shape == (1,df.shape[1]), f"expected one row, got {value_check.shape[0]}"
+    
+    ret=[]
+    for i,col in enumerate(df.columns):
+        if value_check.item(row=0,column=col)==True:
+            ret.append(col)
+        
+    return ret
+
+def df_checkInf(df:pl.DataFrame)->tp.List[str]:
+    inf_check=df.select(pl.col(df.columns).is_infinite().any())
+    assert inf_check.shape == (1,df.shape[1]), f"expected one row, got {inf_check.shape[0]}"
+    
+    ret=[]
+    for i,col in enumerate(df.columns):
+        if inf_check.item(row=0,column=col)==True:
+            ret.append(col)
+        
+    return ret
+
 def remove_nans(df:pl.DataFrame,columns:tp.List[str])->pl.DataFrame:
     """ remove those rows that contain NaN in any of the provided columns """
     filter_exprs:tp.List[pl.Expr]=[]
