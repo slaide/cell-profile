@@ -421,8 +421,7 @@ class PlateMetadata:
                 x:f'{feature_set_name}_{x}' for x in f_df.columns
                 if not (
                     x.startswith("Metadata_")
-                    or
-                    x=="ObjectNumber"
+                    # or x=="ObjectNumber"
                 )
             })
 
@@ -495,21 +494,25 @@ class PlateMetadata:
             ]
         ).mean()
 
-        df=df.rename({"nuclei_Parent_cells":"ObjectNumber"})
+        # df=df.rename({"nuclei_Parent_cells":"ObjectNumber"})
 
         if timeit:
             print_time("calculated average nucleus for each cell")
 
+        last_join_feature_name="nuclei_Parent_cells"
         for _feature_name in [
             "cytoplasm",
             "cells",
             "membrane",
         ]:
             if _feature_name in self.feature_files:
+                new_join_feature_name=f"{_feature_name}_ObjectNumber"
                 df = df.join(self.feature_files[_feature_name], how='inner', 
-                                left_on= self.metadata_cols + ["ObjectNumber"],
-                                right_on = self.metadata_cols + ["ObjectNumber"],
+                                left_on= self.metadata_cols + [last_join_feature_name],
+                                right_on = self.metadata_cols + [new_join_feature_name],
                                 )
+                
+                last_join_feature_name=new_join_feature_name
 
                 if timeit:
                     print_time(f"joined df and {_feature_name}, now have {len(df)} entries")
