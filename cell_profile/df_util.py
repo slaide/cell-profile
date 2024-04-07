@@ -4,6 +4,13 @@ import pandas as pd
 import polars as pl
 import numpy as np
 
+float_columns=[pl.col(pl.Float32),pl.col(pl.Float64)]
+"""
+allows to select only columns that contain float values, e.g. df.select(float_columns)
+
+useful because columns of other types are usually just metadata, e.g. indices [int], strings etc.
+"""
+
 def is_meta_column(
     c:str,
 
@@ -225,6 +232,8 @@ def df_checkNull(df:pl.DataFrame,raise_:bool=False)->tp.List[str]:
     return ret
 
 def df_checkValue(df:pl.DataFrame,value:float,raise_:bool=False)->tp.List[str]:
+    df=df.select(float_columns)
+
     value_check=df.select((pl.col(df.columns)==value).any())
     assert value_check.shape == (1,df.shape[1]), f"expected one row, got {value_check.shape[0]}"
     
@@ -241,6 +250,8 @@ def df_checkValue(df:pl.DataFrame,value:float,raise_:bool=False)->tp.List[str]:
     return ret
 
 def df_checkInf(df:pl.DataFrame,raise_:bool=False)->tp.List[str]:
+    df=df.select(float_columns)
+    
     inf_check=df.select(pl.col(df.columns).is_infinite().any())
     assert inf_check.shape == (1,df.shape[1]), f"expected one row, got {inf_check.shape[0]}"
     
@@ -257,6 +268,8 @@ def df_checkInf(df:pl.DataFrame,raise_:bool=False)->tp.List[str]:
     return ret
 
 def df_checkNaN(df:pl.DataFrame,raise_:bool=False)->tp.List[str]:
+    df=df.select(float_columns)
+    
     nan_check=df.select(pl.col(df.columns).is_nan().any())
     assert nan_check.shape == (1,df.shape[1]), f"expected one row, got {nan_check.shape[0]}"
     

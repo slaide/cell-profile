@@ -15,16 +15,9 @@ import umap
 
 from .df_util import is_meta_column, handle_outliers, remove_nans, \
         remove_highly_correlated, Sigma, Quantile, \
-        df_checkNull, df_checkValue, df_checkInf, df_checkNaN
+        df_checkNull, df_checkValue, df_checkInf, df_checkNaN, float_columns
 
 from .misc import display, print, print_time, tqdm
-
-float_columns=[pl.col(pl.Float32),pl.col(pl.Float64)]
-"""
-allows to select only columns that contain float values, e.g. df.select(float_columns)
-
-useful because columns of other types are usually just metadata, e.g. indices [int], strings etc.
-"""
 
 @dataclass
 class Experiment:
