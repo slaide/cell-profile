@@ -262,6 +262,16 @@ class PlateMetadata:
     """ time_point is 0-indexed (!) """
 
     feature_files:tp.Dict[str,pl.DataFrame]=dc.field(default_factory=dict)
+    """
+    feature files
+
+    currently, these are required:
+        - 'cytoplasm'
+        - 'nuclei'
+        
+    and these are optional:
+        - 'cells'
+    """
 
     metadata_cols:tp.List[str]=dc.field(default_factory=lambda:[
         "Metadata_AcqID",
@@ -480,7 +490,6 @@ class PlateMetadata:
                 "nuclei_Parent_cells",
             ]
         ).mean()
-        # print(f"{feature_files['nuclei'].shape = }")
 
         if timeit:
             print_time("calculated average nucleus for each cell")
@@ -494,13 +503,14 @@ class PlateMetadata:
         if timeit:
             print_time(f"joined cytoplasm and nucleus, now have {len(df)} entries")
 
-        # step 3: join cells objects
-        df = df.join(self.feature_files['cells'], how='inner', 
-                        left_on =  self.metadata_cols + ["cytoplasm_ObjectNumber"],
-                        right_on = self.metadata_cols + ["cells_ObjectNumber"])
+        if "cells" in self.feature_files:
+            # step 3: join cells objects
+            df = df.join(self.feature_files['cells'], how='inner', 
+                            left_on =  self.metadata_cols + ["cytoplasm_ObjectNumber"],
+                            right_on = self.metadata_cols + ["cells_ObjectNumber"])
 
-        if timeit:
-            print_time(f"joined cytoplasm+nucleus and cells, now have {df.shape} entries")
+            if timeit:
+                print_time(f"joined cytoplasm+nucleus and cells, now have {df.shape} entries")
 
         df=df.drop([c for c in df.columns if is_meta_column(c)])
         if self.df_qc is not None:
