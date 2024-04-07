@@ -266,11 +266,12 @@ class PlateMetadata:
     feature files
 
     currently, these are required:
-        - 'cytoplasm'
         - 'nuclei'
-        
+
     and these are optional:
         - 'cells'
+        - 'cytoplasm'
+        - 'membrane'
     """
 
     metadata_cols:tp.List[str]=dc.field(default_factory=lambda:[
@@ -418,7 +419,11 @@ class PlateMetadata:
             f_df=pl.read_parquet(f)
             f_df=f_df.rename({
                 x:f'{feature_set_name}_{x}' for x in f_df.columns
-                if not x.startswith("Metadata_")
+                if not (
+                    x.startswith("Metadata_")
+                    or
+                    x=="ObjectNumber"
+                )
             })
 
             self.feature_files[feature_set_name]=f_df
@@ -480,37 +485,34 @@ class PlateMetadata:
         if timeit:
             print_time("starting")
 
-        assert "cytoplasm" in self.feature_files, "did not find cytoplasm feature file"
         assert "nuclei" in self.feature_files, "did not find nuclei feature file"
 
         # step 1: Take the mean values of 'multiple nuclei' belonging to one cell
-        self.feature_files['nuclei'] = self.feature_files['nuclei'].group_by(
+        df = self.feature_files['nuclei'].group_by(
             self.metadata_cols
             + [
                 "nuclei_Parent_cells",
             ]
         ).mean()
 
+        df=df.rename({"nuclei_Parent_cells":"ObjectNumber"})
+
         if timeit:
             print_time("calculated average nucleus for each cell")
 
-        # step 2: merge nuclei and cytoplasm objects
-        df = self.feature_files['cytoplasm'].join(self.feature_files['nuclei'],
-                        how='inner', 
-                        right_on= self.metadata_cols + ["nuclei_Parent_cells"],
-                        left_on = self.metadata_cols + ["cytoplasm_ObjectNumber"])
+        for _feature_name in [
+            "cytoplasm",
+            "cells",
+            "membrane",
+        ]:
+            if _feature_name in self.feature_files:
+                df = df.join(self.feature_files[_feature_name], how='inner', 
+                                left_on= self.metadata_cols + ["ObjectNumber"],
+                                right_on = self.metadata_cols + ["ObjectNumber"],
+                                )
 
-        if timeit:
-            print_time(f"joined cytoplasm and nucleus, now have {len(df)} entries")
-
-        if "cells" in self.feature_files:
-            # step 3: join cells objects
-            df = df.join(self.feature_files['cells'], how='inner', 
-                            left_on =  self.metadata_cols + ["cytoplasm_ObjectNumber"],
-                            right_on = self.metadata_cols + ["cells_ObjectNumber"])
-
-            if timeit:
-                print_time(f"joined cytoplasm+nucleus and cells, now have {df.shape} entries")
+                if timeit:
+                    print_time(f"joined df and {_feature_name}, now have {len(df)} entries")
 
         df=df.drop([c for c in df.columns if is_meta_column(c)])
         if self.df_qc is not None:
