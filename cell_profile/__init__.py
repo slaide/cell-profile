@@ -706,9 +706,10 @@ class PlateMetadata:
             print_time("calculated DMSO distribution")
 
         # normalize plate to DMSO distribution
-        df_normalized = df.with_columns(
-            (pl.col(mu.columns) - mu) / std
-        )
+        df_normalized = df.with_columns([
+            (pl.col(c) - mu.select(c)) / std.select(c)
+            for c in mu.columns
+        ])
 
         if ensure_no_nan_or_inf:
             df_checkInf(df_normalized,raise_=True)
