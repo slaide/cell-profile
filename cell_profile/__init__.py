@@ -189,8 +189,8 @@ class Experiment:
             return compound_layout
         else:
             source_file=Path(source)
-            assert source_file.exists(), f"""compound layout source file '{
-                source}' does not exist (current directory is {os.getcwd()})"""
+            assert source_file.exists(), f"compound layout source file '{source}'" \
+                 f" does not exist (current directory is {os.getcwd()})"
 
             file_default_colnames_ret:list="well_id pert_type".split(" ")
             if file_colnames_ret is None:
@@ -561,17 +561,16 @@ class PlateMetadata:
                     threshold=remove_correlation_threshold,
                     remove_inplace=False
                 )
-                assert type(highly_correlated_columns)==list, f"""expected list, got {
-                    type(highly_correlated_columns)
-                }"""
+                assert type(highly_correlated_columns)==list, f"expected list, got " \
+                    f"{type(highly_correlated_columns)}"
                 df = df.drop(highly_correlated_columns)
 
             if timeit:
                 print_time(
                     "removed columns with high correlation" \
-                    f"""Number of columns after removing sigma<={
-                        unused_feature_threshold_std
-                    } and highly correlated: {df.shape[1]}"""
+                    f"Number of columns after removing sigma<=" \
+                    f"{unused_feature_threshold_std}" \
+                    f" and highly correlated: {df.shape[1]}"
                 )
         elif handle_unused_features is None:
             pass
@@ -605,9 +604,9 @@ class PlateMetadata:
                 df=df[~(site_is_inf_mask|site_is_nan_mask)]
 
             num_metadata_site_entries_nonint=np.sum(np.abs(df['Metadata_Site']%1.0)>1e-6)
-            assert num_metadata_site_entries_nonint==0, f"""ERROR : {
-                num_metadata_site_entries_nonint
-            } imaging sites don't have integer indices. that should not be the case, and likely indicates a bug."""
+            assert num_metadata_site_entries_nonint==0, f"ERROR :" \
+                f" {num_metadata_site_entries_nonint}" \
+                f" imaging sites don't have integer indices. that should not be the case, and likely indicates a bug."
 
             df['Metadata_Site']=df['Metadata_Site'].cast(pl.Int32)
 
@@ -728,9 +727,9 @@ class PlateMetadata:
 
         fraction_objects_containing_nan=1-(num_rows_after_nan_trim/num_rows_before_nan_trim)
         if timeit:
-            print_time(f"""num objects (cells) {num_objects} ({
-                (fraction_objects_containing_nan*100):.2f
-            }% were NaN)""")
+            print_time(f"num objects (cells) {num_objects} (" \
+                f"{(fraction_objects_containing_nan*100):.2f}%" \
+                f" were NaN)")
 
         # group/combine by well
 
