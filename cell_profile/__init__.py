@@ -512,7 +512,9 @@ class PlateMetadata:
                                 right_on = self.metadata_cols + [new_join_feature_name],
                                 )
                 
-                last_join_feature_name=new_join_feature_name
+                # do not actually override because polars re-uses the previous column name
+                # e.g. on inner joining left.c1 with right.c2, the resulting column is named c1 (and c2 is lost)
+                #last_join_feature_name=new_join_feature_name
 
                 if timeit:
                     print_time(f"joined df and {_feature_name}, now have {len(df)} entries")
