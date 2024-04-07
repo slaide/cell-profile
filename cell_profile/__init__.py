@@ -563,9 +563,9 @@ class PlateMetadata:
                     threshold=remove_correlation_threshold,
                     remove_inplace=False
                 )
-                assert type(highly_correlated_columns)==list, f"expected list, got {
+                assert type(highly_correlated_columns)==list, f"""expected list, got {
                     type(highly_correlated_columns)
-                }"
+                }"""
                 df = df.drop(highly_correlated_columns)
 
             if timeit:
