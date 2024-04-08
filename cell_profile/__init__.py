@@ -517,13 +517,14 @@ class PlateMetadata:
                 # e.g. on inner joining left.c1 with right.c2, the resulting column is named c1 (and c2 is lost)
 
                 left_on_cols=self.metadata_cols+[root_feature_name]
+                right_on_cols=self.metadata_cols+[right_feature_name]
 
                 df = df.join(
-                                    # aggregate other dataframe by primary keys and calc mean to eliminate duplicate entries
-                                    self.feature_files[_feature_name].group_by(left_on_cols).mean(),
+                                    # aggregate other dataframe and calc mean to eliminate duplicate entries
+                                    self.feature_files[_feature_name].group_by(right_on_cols).mean(),
                                     how='inner', 
                                     left_on=left_on_cols,
-                                    right_on=self.metadata_cols+[right_feature_name],
+                                    right_on=right_on_cols,
                                 )
 
                 if timeit:
