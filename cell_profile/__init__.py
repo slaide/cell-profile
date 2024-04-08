@@ -8,10 +8,10 @@ import numpy as np
 import polars as pl
 import pandas as pd
 
-import plotly.express as px
+import plotly.express as px # type: ignore
 
-from sklearn.decomposition import PCA
-import umap
+from sklearn.decomposition import PCA # type: ignore
+import umap # type: ignore
 
 from .df_util import is_meta_column, handle_outliers, remove_nans, \
         remove_highly_correlated, Sigma, Quantile, \
