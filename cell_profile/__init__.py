@@ -801,6 +801,8 @@ class Plate:
         *,
         print_feature_pca_fraction:bool=False,
         method:str="pca",
+
+        file_out:tp.Optional[str]=None,
     ):
         """
             print_feature_pca_fraction:
@@ -864,4 +866,9 @@ class Plate:
             margin=dict(l=20, r=20, t=40, b=20),
         ).update_traces(
             marker=dict(size=10)
-        ).show()
+        )
+
+        if file_out is None:
+            fig.show()
+        else:
+            fig.write_html(file_out)
