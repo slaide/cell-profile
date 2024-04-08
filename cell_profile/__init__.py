@@ -202,7 +202,7 @@ class Experiment:
 
             return layout_df
 
-    def retrieve_plates_metadata(self)->tp.List["PlateMetadata"]:
+    def retrieve_plates_metadata(self,**plate_metadata_init_kwargs)->tp.List["PlateMetadata"]:
         """
         get list of all plates in this experiment
         """
@@ -238,6 +238,7 @@ class Experiment:
             valid_timepoints.append(PlateMetadata(
                 time_point_index=time_point,
                 plate_name=Path(image_plate_dir).name,
+                **plate_metadata_init_kwargs,
             ))
 
         return valid_timepoints
@@ -258,13 +259,7 @@ class PlateMetadata:
     """
     feature files
 
-    currently, these are required:
-        - 'nuclei'
-
-    and these are optional:
-        - 'cells'
-        - 'cytoplasm'
-        - 'membrane'
+    keys are the feature set names (not filename! i.e. must not end in .csv etc.), values are the dataframes containing the features
     """
 
     metadata_cols:tp.List[str]=dc.field(default_factory=lambda:[
@@ -273,6 +268,30 @@ class PlateMetadata:
         "Metadata_Well",
         "Metadata_Site"
     ])
+
+    root_key:tp.Dict[str,str]=dc.field(default_factory=lambda:{
+        "root_file":"nuclei",
+        "root_attribute_col":"ObjectNumber",
+        "foreign_attribute_col":"{featureFilename}_Parent_nucleus",
+    })
+    """
+    root_key is used to join the different feature files together
+
+    must have a structure with exactly these keys:
+        - root_file
+
+            this feature file contains the primary objects
+
+        - root_attribute_col
+
+            in root_file, this column identifies a primary object, so joining will be relative to this (e.g. ObjectNumber)
+
+        - foreign_attribute_col
+
+            root_attribute_col will be joined with this identifier in other feature frames
+
+            this string may contain '{featureFilename}' (e.g. '{featureFilename}_Parent_cells') which is expaneded to insert the feature filename
+    """
 
     feature_file_prefix: str='featICF_'
     """ this prefix is used in several file operations """
@@ -413,8 +432,8 @@ class PlateMetadata:
             f_df=f_df.rename({
                 x:f'{feature_set_name}_{x}' for x in f_df.columns
                 if not (
-                    x.startswith("Metadata_")
-                    # or x=="ObjectNumber"
+                    x in self.metadata_cols
+                    or (Path(f).stem==self.root_key["root_file"] and x==self.root_key["root_attribute_col"])
                 )
             })
 
@@ -477,37 +496,35 @@ class PlateMetadata:
         if timeit:
             print_time("starting")
 
-        assert "nuclei" in self.feature_files, "did not find nuclei feature file"
+        assert self.root_key["root_file"] in self.feature_files, "did not find root feature file: "+self.root_key["root_file"]+" in "+str(self.feature_files.keys())
 
-        # step 1: Take the mean values of 'multiple nuclei' belonging to one cell
-        df = self.feature_files['nuclei'].group_by(
-            self.metadata_cols
-            + [
-                "nuclei_Parent_cells",
-            ]
-        ).mean()
+        # step 1: read root file
+        df = self.feature_files[self.root_key["root_file"]]
+        root_feature_name=self.root_key["root_attribute_col"]
 
-        # df=df.rename({"nuclei_Parent_cells":"ObjectNumber"})
+        assert root_feature_name in df.columns, f"did not find {root_feature_name} of root file {self.root_key['root_file']} in {df.columns}"
 
         if timeit:
-            print_time("calculated average nucleus for each cell")
+            print_time(f"read root file {self.root_key['root_file']}")
 
-        last_join_feature_name="nuclei_Parent_cells"
-        for _feature_name in [
-            "cytoplasm",
-            "cells",
-            "membrane",
-        ]:
+        optional_feature_set_names=set(self.feature_set_names)-{self.root_key["root_file"]}
+
+        for _feature_name in optional_feature_set_names:
             if _feature_name in self.feature_files:
-                new_join_feature_name=f"{_feature_name}_ObjectNumber"
-                df = df.join(self.feature_files[_feature_name], how='inner', 
-                                left_on= self.metadata_cols + [last_join_feature_name],
-                                right_on = self.metadata_cols + [new_join_feature_name],
-                                )
-                
-                # do not actually override because polars re-uses the previous column name
+                right_feature_name=self.root_key["foreign_attribute_col"].format(featureFilename=_feature_name)
+
+                # polars re-uses the left column name!
                 # e.g. on inner joining left.c1 with right.c2, the resulting column is named c1 (and c2 is lost)
-                #last_join_feature_name=new_join_feature_name
+
+                left_on_cols=self.metadata_cols+[root_feature_name]
+
+                df = df.join(
+                                    # aggregate other dataframe by primary keys and calc mean to eliminate duplicate entries
+                                    self.feature_files[_feature_name].group_by(left_on_cols).mean(),
+                                    how='inner', 
+                                    left_on=left_on_cols,
+                                    right_on=self.metadata_cols+[right_feature_name],
+                                )
 
                 if timeit:
                     print_time(f"joined df and {_feature_name}, now have {len(df)} entries")
@@ -662,7 +679,8 @@ class PlateMetadata:
                 for x in wells_with_dmso.columns
             }),
             left_on='Metadata_Well',
-            right_on='compoundinfo_compound_well_id')
+            right_on='compoundinfo_compound_well_id'
+        )
         
         # then remove the compound information columns again
         df_DMSO = df_DMSO.select([
