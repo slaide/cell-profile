@@ -505,7 +505,7 @@ class PlateMetadata:
         assert root_feature_name in df.columns, f"did not find {root_feature_name} of root file {self.root_key['root_file']} in {df.columns}"
 
         if timeit:
-            print_time(f"read root file {self.root_key['root_file']}")
+            print_time(f"read root file {self.root_key['root_file']} with {len(df)} entries")
 
         optional_feature_set_names=set(self.feature_set_names)-{self.root_key["root_file"]}
 
@@ -530,7 +530,11 @@ class PlateMetadata:
                 if timeit:
                     print_time(f"joined df and {_feature_name}, now have {len(df)} entries")
 
-        df=df.drop([c for c in df.columns if is_meta_column(c)])
+        # drop metadata columns
+        df=df.drop([
+            c for c in df.columns
+            if is_meta_column(c)
+        ])
         if self.df_qc is not None:
             self.df_qc=self.df_qc.drop([
                 c for c in self.df_qc.columns
@@ -596,7 +600,7 @@ class PlateMetadata:
             raise ValueError(f"handle_unused_features is {handle_unused_features} but must be None or 'remove'")
         
         if timeit:
-            print_time("joining done")
+            print_time(f"joining done, {len(df)} remaining")
 
         # now we have all data merged, and can start filerting, cleaning etc.
         
@@ -629,7 +633,7 @@ class PlateMetadata:
             df['Metadata_Site']=df['Metadata_Site'].cast(pl.Int32)
 
         if timeit:
-            print_time("processed some metadate")
+            print_time("processed some metadata")
 
         # [optional] investigate non-float columns
         if show_non_float_columns:
@@ -656,7 +660,7 @@ class PlateMetadata:
         num_rows_after_nan_trim=df.shape[0]
 
         if timeit:
-            print_time("dropped NaNs")
+            print_time(f"dropped NaNs, {len(df)} remaining")
 
         # remove outliers
         df_float_cols=df.select(float_columns).columns
@@ -664,7 +668,7 @@ class PlateMetadata:
             df=handle_outliers(df,df_float_cols,**pre_normalize_clip_method)
             
         if timeit:
-            print_time("pre-normalization clipping done")
+            print_time(f"pre-normalization clipping done, {len(df)} remaining")
 
         # filter wells not treated with any drug, just DMSO
         wells_with_dmso=compound_layout.filter(pl.col('compound_pert_type')=='negcon')
