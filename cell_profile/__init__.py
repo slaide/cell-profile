@@ -453,6 +453,9 @@ class PlateMetadata:
 
         *,
         timeit:bool=False,
+
+        df_cols_float_to_int:tp.List[str]=[],
+
         show_non_float_columns:bool=False,
         ensure_no_nan_or_inf:bool=False,
         
@@ -483,6 +486,11 @@ class PlateMetadata:
                     - "remove" : remove them
                 
                 note: in one test, this reduced the number of features from 1800 to 1100.
+
+            df_cols_float_to_int:
+                columns in the final dataframe to be converted from float to int
+
+                this includes checks to ensure that the values are int(-ish)
             
             remove_correlated:
                 remove highly correlated features
@@ -512,6 +520,9 @@ class PlateMetadata:
         for _feature_name in optional_feature_set_names:
             if _feature_name in self.feature_files:
                 right_feature_name=self.root_key["foreign_attribute_col"].format(featureFilename=_feature_name)
+                if right_feature_name not in self.feature_files[_feature_name].columns:
+                    relevant_cols=[c for c in self.feature_files[_feature_name].columns if c.endswith(right_feature_name[-6:])]
+                    raise ValueError(f"did not find column {right_feature_name} in {_feature_name}, some columns that may be relevant are {relevant_cols}")
 
                 # polars re-uses the left column name!
                 # e.g. on inner joining left.c1 with right.c2, the resulting column is named c1 (and c2 is lost)
@@ -608,32 +619,25 @@ class PlateMetadata:
         if self.df_qc is not None:
             pass # TODO
 
-        # for some reason, the site is parsed as float, even though it really should be an int
-        # so convert site column to int, and check that the converted values make sense
-        metadata_site_dtype=str(df['Metadata_Site'].dtype)
-        if "float" in metadata_site_dtype:
-            # sometimes, for some reason, site indices are inf/nan
-            site_is_nan_mask=np.isnan(df['Metadata_Site'])
-            site_is_inf_mask=np.isinf(df['Metadata_Site'])
+        if len(df_cols_float_to_int)>0:
+            for col_to_convert in df_cols_float_to_int:
+                # for some reason, the site is parsed as float, even though it really should be an int
+                # so convert site column to int, and check that the converted values make sense
+                metadata_site_dtype=str(df[col_to_convert].dtype)
+                if "float" in metadata_site_dtype:
+                    # sometimes, for some reason, site indices are inf/nan
+                    df_checkNaN(df.select(col_to_convert),raise_=True)
+                    df_checkInf(df.select(col_to_convert),raise_=True)
 
-            try:
-                num_sites_nan=np.sum(site_is_nan_mask)
-                num_sites_inf=np.sum(site_is_inf_mask)
-                assert num_sites_nan==0, f"found site with value nan (n = {num_sites_nan})"
-                assert num_sites_inf==0, f"found site with value inf (n = {num_sites_inf})"
-            except AssertionError as e:
-                print(f"info - {e}")
-                df=df[~(site_is_inf_mask|site_is_nan_mask)]
+                    num_metadata_site_entries_nonint=np.sum(np.abs(df.select(col_to_convert)%1.0)>1e-6)
+                    assert num_metadata_site_entries_nonint==0, f"ERROR :" \
+                        f" {num_metadata_site_entries_nonint}" \
+                        f" values in {col_to_convert} are not integers!"
 
-            num_metadata_site_entries_nonint=np.sum(np.abs(df['Metadata_Site']%1.0)>1e-6)
-            assert num_metadata_site_entries_nonint==0, f"ERROR :" \
-                f" {num_metadata_site_entries_nonint}" \
-                f" imaging sites don't have integer indices. that should not be the case, and likely indicates a bug."
+                    df[col_to_convert]=df[col_to_convert].cast(pl.Int32)
 
-            df['Metadata_Site']=df['Metadata_Site'].cast(pl.Int32)
-
-        if timeit:
-            print_time("processed some metadata")
+            if timeit:
+                print_time("converted some float cols to int")
 
         # [optional] investigate non-float columns
         if show_non_float_columns:
@@ -676,22 +680,20 @@ class PlateMetadata:
         # make sure we have some wells with DMSO !
         assert wells_with_dmso.shape[0]>0, "did not find any wells 'treated' with DMSO"
 
+        data_join_compound_layout_left_on=["Metadata_Well"]
+        """ combined_per_well join compound_layout on this column"""
+        data_join_compound_layout_right_on=["compound_well_id"]
+        """ combined_per_well join compound_layout on this column"""
+
         # use join to quickly select the relevant rows
-        # but add unique prefix to compound information columns (to avoid name collisions)
+        # note: this statement below does not introduce new/additional columns
         df_DMSO = df.join(
-            wells_with_dmso.rename({
-                x:f"compoundinfo_{x}"
-                for x in wells_with_dmso.columns
-            }),
-            left_on='Metadata_Well',
-            right_on='compoundinfo_compound_well_id'
+            wells_with_dmso.select(data_join_compound_layout_right_on),
+            how="inner",
+            left_on=data_join_compound_layout_left_on,
+            right_on=data_join_compound_layout_right_on
         )
         
-        # then remove the compound information columns again
-        df_DMSO = df_DMSO.select([
-            x for x in df_DMSO.columns
-            if not x.startswith('compoundinfo_')
-        ])
         # ensure there is sufficient data on the DMSO wells
         assert df_DMSO.shape[0]>0, "error!"
 
@@ -756,17 +758,16 @@ class PlateMetadata:
 
         # group/combine by well
 
-        df=df.drop(columns=['Metadata_Site']) # should be redundant
         df_float_columns=set(df.select(float_columns).columns)
-        group_by_columns=['Metadata_Well']
+        group_by_columns=self.metadata_cols # this might include more features than strictly necessary, but that is fine
         other_columns=set(df.columns) \
             - df_float_columns \
             - set(group_by_columns)
         
         # group by mean for all float features, and group by first for all non-float columns (indices and string metadata)
         group_by_aggregates=[
-            *[pl.mean(x) for x in list(df_float_columns)],
-            *[pl.first(x) for x in list(other_columns)]
+            *[pl.mean(x) for x in df_float_columns],
+            *[pl.first(x) for x in other_columns]
         ]
 
         combined_per_well=df.group_by(group_by_columns).agg(group_by_aggregates)
@@ -778,8 +779,8 @@ class PlateMetadata:
         combined_per_well=combined_per_well.join(
             compound_layout,
             how='left',
-            left_on=["Metadata_Well"],
-            right_on=["compound_well_id"]
+            left_on=data_join_compound_layout_left_on,
+            right_on=data_join_compound_layout_right_on,
         )
 
         if timeit:
