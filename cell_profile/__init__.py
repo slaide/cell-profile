@@ -824,7 +824,7 @@ class Plate:
     def plot(self,
         *,
         print_feature_pca_fraction:bool=False,
-        method:str="pca",
+        method:tp.Literal["pca","umap","pacmap"]="pca",
 
         file_out:tp.Optional[str]=None,
     ):
@@ -864,6 +864,9 @@ class Plate:
             n_components=2
             umap_red = umap.UMAP(n_components=n_components) # type: ignore
             reduced_data=umap_red.fit_transform(df)
+        elif method=="pacmap":
+            # https://pypi.org/project/pacmap/
+            raise NotImplementedError("pacmap")
         else:
             raise ValueError(f"unknown method {method} (valid methods are [pca|umap])")
 
