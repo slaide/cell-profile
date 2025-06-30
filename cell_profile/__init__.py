@@ -847,8 +847,6 @@ class Plate:
         print_feature_pca_fraction:bool=False,
         method:tp.Literal["pca","umap","pacmap"]="pca",
 
-        restrict_treatment_groups:tp.Optional[tp.List[str]]=None,
-
         file_out:tp.Optional[str]=None,
 
         umap_args:tp.Optional[tp.Dict[str,tp.Any]]=None,
@@ -859,9 +857,6 @@ class Plate:
         """
 
         df=self.numeric_data()
-
-        if restrict_treatment_groups is not None:
-            df=df.select(pl.col("compound_pert_type").in(restrict_treatment_groups))
 
         df_checkNull(df,raise_=True)
         df_checkInf(df,raise_=True)
