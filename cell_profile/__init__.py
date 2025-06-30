@@ -445,7 +445,7 @@ class PlateMetadata:
         if timeit:
             print_time("reading feature files dones")
 
-
+    @pl.StringCache() # enable polars string cache for this function to optimize conversion from string to categorical column data type
     def process(
         self,
         
@@ -531,21 +531,22 @@ class PlateMetadata:
                 right_on_cols=self.metadata_cols+[right_feature_name]
 
                 df = df.join(
-                                    # aggregate other dataframe and calc mean to eliminate duplicate entries
-                                    self.feature_files[_feature_name].group_by(right_on_cols).mean(),
-                                    how='inner', 
-                                    left_on=left_on_cols,
-                                    right_on=right_on_cols,
-                                )
+                            # aggregate other dataframe and calc mean to eliminate duplicate entries
+                            self.feature_files[_feature_name].group_by(right_on_cols).mean(),
+                            how='inner', 
+                            left_on=left_on_cols,
+                            right_on=right_on_cols,
+                        )
 
                 if timeit:
                     print_time(f"joined df and {_feature_name}, now have {len(df)} entries")
 
-        # drop metadata columns
+        # drop unused metadata columns
         df=df.drop([
             c for c in df.columns
             if is_meta_column(c)
         ])
+        
         if self.df_qc is not None:
             self.df_qc=self.df_qc.drop([
                 c for c in self.df_qc.columns
@@ -605,15 +606,35 @@ class PlateMetadata:
                     f"{unused_feature_threshold_std}" \
                     f" and highly correlated: {df.shape[1]}"
                 )
+                
         elif handle_unused_features is None:
             pass
+            
         else:
             raise ValueError(f"handle_unused_features is {handle_unused_features} but must be None or 'remove'")
         
         if timeit:
             print_time(f"joining done, {len(df)} remaining")
 
-        # now we have all data merged, and can start filerting, cleaning etc.
+        # now we have all data merged, and can start filerting, cleaning etc
+        
+        # dataframes in use at this point:
+        # - df: contains all per-cell features
+        # - compound_layout: contains per-well metadata
+
+        # convert string typed columns to categorical to save space
+        if 1:
+            def convert_string_cols_to_categorical(df:pl.DataFrame)->pl.DataFrame:
+                converted_columns = [col for col in df.columns if df.schema[col] == pl.Utf8]
+                df = df.with_columns([pl.col(col).cast(pl.Categorical) for col in converted_columns])
+                
+                if timeit:
+                    print_time(f"Converted string columns to categorical: {converted_columns}")
+    
+                return df
+
+            df=convert_string_cols_to_categorical(df)
+            compound_layout=convert_string_cols_to_categorical(compound_layout)
         
         # if present, use self.df_qc to filter out bad images
         if self.df_qc is not None:
@@ -826,7 +847,11 @@ class Plate:
         print_feature_pca_fraction:bool=False,
         method:tp.Literal["pca","umap","pacmap"]="pca",
 
+        restrict_treatment_groups:tp.Optional[tp.List[str]]=None,
+
         file_out:tp.Optional[str]=None,
+
+        umap_args:tp.Optional[tp.Dict[str,tp.Any]]=None,
     ):
         """
             print_feature_pca_fraction:
@@ -834,6 +859,9 @@ class Plate:
         """
 
         df=self.numeric_data()
+
+        if restrict_treatment_groups is not None:
+            df=df.select(pl.col("compound_pert_type").in(restrict_treatment_groups))
 
         df_checkNull(df,raise_=True)
         df_checkInf(df,raise_=True)
@@ -860,13 +888,32 @@ class Plate:
                 top_contributors_df = pd.DataFrame(top_contributors)
 
                 print(top_contributors_df) # type: ignore
+                
         elif method=="umap":
-            n_components=2
-            umap_red = umap.UMAP(n_components=n_components) # type: ignore
+            umap_default_args=dict(
+                random_state=42,#for reproducible results
+                n_components=2,#we usually just use 2 dimensions, for plotting
+                n_neighbors=10,#according to the docs, this is a sensible default
+                min_dist=0.1,#according to the docs, this is a sensible default
+                metric='correlation',#just use any, correlation was not chosen for a specific reason 
+            )
+
+            if umap_args is None:
+                umap_args={}
+
+            # set default values only if not already present
+            for key,value in umap_default_args.items():
+                if not key in umap_args:
+                    umap_args[key]=value
+            
+            umap_red = umap.UMAP(**umap_args)
+            
             reduced_data=umap_red.fit_transform(df)
+            
         elif method=="pacmap":
             # https://pypi.org/project/pacmap/
             raise NotImplementedError("pacmap")
+            
         else:
             raise ValueError(f"unknown method {method} (valid methods are [pca|umap])")
 

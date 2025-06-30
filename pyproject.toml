@@ -6,7 +6,8 @@ dependencies = [
 	"tqdm",
 	"scikit-learn",
 	"plotly>=5.16,<5.17",
-	"umap-learn==0.5.5",
+	"umap-learn",
+    "pacmap",
 
 	# default dataframe library
 	"pandas>=1.5.3,<1.6",
@@ -19,7 +20,7 @@ dependencies = [
 	"pyarrow",
 
 	# fast pandas compatible dataframe library
-	"polars>=0.19.9,<0.20.0",
-	"sqlalchemy<2.0",
+	"polars",
 	# required for polars database connection
+	"sqlalchemy<2.0",
 ]
