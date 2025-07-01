@@ -316,8 +316,8 @@ class PlateMetadata:
         *,
         timeit:bool=False,
     ):
-
-        cellprofiler_image_timepoints:tp.List[str]=cellprofiler_pipelines["timepoint"].to_list()
+        pipeline_timepoint=cellprofiler_pipelines.get("timepoint")
+        cellprofiler_image_timepoints:tp.List[str]=pipeline_timepoint.to_list()
         
         # not sure anymore why this is necessary, but it is
         self.time_point=int(cellprofiler_image_timepoints[self.time_point_index-1])
@@ -326,13 +326,13 @@ class PlateMetadata:
             pl.col("timepoint")==str(self.time_point)
         ).rows(named=True)[0]
 
-        pipeline_plat_id=current_pipeline["plate_id"]
+        pipeline_plat_id=current_pipeline.get("plate_id")
         assert isinstance(pipeline_plat_id,str)
         cp_plate_out_path=cellprofiler_output_path/pipeline_plat_id
 
-        pipeline_id_qc_str=current_pipeline["pipeline_id_qc"]
-        assert isinstance(pipeline_id_qc_str,str)
+        pipeline_id_qc_str=current_pipeline.get("pipeline_id_qc")
         if pipeline_id_qc_str:
+            assert isinstance(pipeline_id_qc_str,str)
             pipeline_id_qc=cp_plate_out_path/pipeline_id_qc_str
 
             qcraw_images_parquet_files=list(
