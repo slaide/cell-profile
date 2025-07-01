@@ -327,12 +327,12 @@ class PlateMetadata:
         ).rows(named=True)[0]
 
         pipeline_plat_id=current_pipeline.get("plate_id")
-        assert isinstance(pipeline_plat_id,str)
+        assert isinstance(pipeline_plat_id,str), f"{type(pipeline_plat_id)}"
         cp_plate_out_path=cellprofiler_output_path/pipeline_plat_id
 
         pipeline_id_qc_str=current_pipeline.get("pipeline_id_qc")
         if pipeline_id_qc_str:
-            assert isinstance(pipeline_id_qc_str,str)
+            assert isinstance(pipeline_id_qc_str,str), f"{type(pipeline_id_qc_str)}"
             pipeline_id_qc=cp_plate_out_path/pipeline_id_qc_str
 
             qcraw_images_parquet_files=list(
@@ -424,7 +424,7 @@ class PlateMetadata:
                 print_time("joined qc files")
 
         pipeline_id_feat=current_pipeline["pipeline_id_feat"]
-        assert isinstance(pipeline_id_feat,str)
+        assert isinstance(pipeline_id_feat,str), f"{type(pipeline_id_feat)}"
         pipeline_id_features=cp_plate_out_path/pipeline_id_feat
 
         feature_parquet_files=list(Path(pipeline_id_features).glob("*.parquet"))
