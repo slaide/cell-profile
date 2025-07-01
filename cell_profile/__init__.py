@@ -316,7 +316,7 @@ class PlateMetadata:
         *,
         timeit:bool=False,
     ):
-        pipeline_timepoint=cellprofiler_pipelines.get("timepoint")
+        pipeline_timepoint=cellprofiler_pipelines["timepoint"]
         cellprofiler_image_timepoints:tp.List[str]=pipeline_timepoint.to_list()
         
         # not sure anymore why this is necessary, but it is
