@@ -322,19 +322,24 @@ class PlateMetadata:
         # not sure anymore why this is necessary, but it is
         self.time_point=int(cellprofiler_image_timepoints[self.time_point_index-1])
 
-        current_pipeline=cellprofiler_pipelines.filter(
+        current_pipeline:dict[str,str|int|float]=cellprofiler_pipelines.filter(
             pl.col("timepoint")==str(self.time_point)
         ).rows(named=True)[0]
 
-        cp_plate_out_path=cellprofiler_output_path/current_pipeline["plate_id"]
+        pipeline_plat_id=current_pipeline["plate_id"]
+        assert isinstance(pipeline_plat_id,str)
+        cp_plate_out_path=cellprofiler_output_path/pipeline_plat_id
 
-        pipeline_id_qc=None
-        if current_pipeline["pipeline_id_qc"]:
-            pipeline_id_qc=cp_plate_out_path/current_pipeline["pipeline_id_qc"]
+        pipeline_id_qc_str=current_pipeline["pipeline_id_qc"]
+        assert isinstance(pipeline_id_qc_str,str)
+        if pipeline_id_qc_str:
+            pipeline_id_qc=cp_plate_out_path/pipeline_id_qc_str
 
-            qc_raw_filepath=list(
+            qcraw_images_parquet_files=list(
                 Path(pipeline_id_qc).glob("qcRAW_images*.parquet")
-            )[0]
+            )
+            assert len(qcraw_images_parquet_files)>0
+            qc_raw_filepath=qcraw_images_parquet_files[0]
             self.df_qc_images=pl.read_parquet(qc_raw_filepath)
             # print(f"{self.df_qc_images.shape = }")
             
@@ -418,7 +423,9 @@ class PlateMetadata:
             if timeit:
                 print_time("joined qc files")
 
-        pipeline_id_features=cp_plate_out_path/current_pipeline["pipeline_id_feat"]
+        pipeline_id_feat=current_pipeline["pipeline_id_feat"]
+        assert isinstance(pipeline_id_feat,str)
+        pipeline_id_features=cp_plate_out_path/pipeline_id_feat
 
         feature_parquet_files=list(Path(pipeline_id_features).glob("*.parquet"))
         for f in sorted(feature_parquet_files):
@@ -730,7 +737,7 @@ class PlateMetadata:
         std = df_DMSO.select(float_columns).std()
         # replace 0 with 1 (specifically not clip) to avoid div by zero
         std = std.select([
-            pl.col(c).map_dict({0: 1}, default=pl.first())
+            pl.col(c).replace({0: 1}, default=pl.first())
             for c in std.columns
         ])
         
